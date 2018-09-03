@@ -1,0 +1,57 @@
+version: '3.4'
+
+# NOTE: Cassandra service takes a while to start (~1 minute).
+# So the Kafka and Cassandra service cannot be "linked" directly
+# to go-eventpersistence, some delay is required after starting Zookeeper,
+# Kafka, and Cassandra before go-eventpersistence can be started and used.
+# See the run_test.sh file.
+services:
+  go-eventpersistence:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+      args:
+        SOURCE_REPO: go-eventpersistence
+    env_file:
+      - ../.env
+    environment:
+      CASSANDRA_HOSTS: cassandra:9042
+      CGO_ENABLED: 0
+      GOOS: linux
+      KAFKA_BROKERS: kafka:9092
+
+  go-eventpersistence-test:
+    build:
+      context: ../
+      dockerfile: Dockerfile_test
+      args:
+        SOURCE_REPO: go-eventpersistence
+    env_file:
+      - ../.env
+    environment:
+      CASSANDRA_HOSTS: cassandra:9042
+      CGO_ENABLED: 0
+      KAFKA_BROKERS: kafka:9092
+
+  cassandra:
+    image: bitnami/cassandra:latest
+    container_name: cassandra
+    ports:
+      - "9042:9042"
+
+  kafka:
+    image: confluent/kafka
+    container_name: kafka
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    links:
+      - zookeeper
+    ports:
+     - "9092:9092"
+
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    ports:
+      - 2181:2181
