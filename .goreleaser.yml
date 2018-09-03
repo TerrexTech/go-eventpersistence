@@ -1,0 +1,36 @@
+project_name: go-eventpersistence
+
+builds:
+  - main: ./main/
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+
+archive:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  format: binary
+
+sign:
+  artifacts: none
+
+release:
+  github:
+    owner: TerrexTech
+    name: go-eventpersistence
+
+changelog:
+  sort: asc
+
+dockers:
+  - image: terrextech/go-eventpersistence
+    binary: go-eventpersistence
+    dockerfile: Dockerfile_ci
+    goos: linux
+    goarch: amd64
+    tag_templates:
+      - "{{ .Tag }}"
+      - latest
+    extra_files:
+      - .env
