@@ -1,4 +1,5 @@
-FROM golang:1.11.0-alpine3.8
+# ===> Build Image
+FROM golang:1.11.0-alpine3.8 AS builder
 LABEL maintainer="Jaskaranbir Dhillon"
 
 ARG SOURCE_REPO
@@ -20,4 +21,10 @@ RUN dep ensure --vendor-only -v
 COPY . ./
 
 RUN go build -v -a -installsuffix nocgo -o /app ./main
-ENTRYPOINT ["/app"]
+
+# ===> Run Image
+FROM scratch
+LABEL maintainer="Jaskaranbir Dhillon"
+
+COPY --from=builder /app ./
+ENTRYPOINT ["./app"]
