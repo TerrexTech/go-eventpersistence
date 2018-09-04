@@ -12,6 +12,10 @@ go:
 git:
   depth: 1
 
+branches:
+  except:
+    - staging.tmp
+
 env:
   global:
     - DOCKER_COMPOSE_VERSION=1.22.0
