@@ -21,7 +21,12 @@ release:
     name: go-eventpersistence
 
 changelog:
-  sort: asc
+  filters:
+    sort: asc
+    exclude:
+      - '^bors:'
+      - '^docs:'
+      - typo
 
 dockers:
   - image: terrextech/go-eventpersistence
