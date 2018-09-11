@@ -67,14 +67,10 @@ func processEvent(
 	if err != nil {
 		// Kafka-Response informing that the Unmarshalling was unsuccessful.
 		err = errors.Wrap(err, "Error Unmarshalling Event-string to Event-struct")
-		kr := &model.KafkaResponse{
-			Input: string(eventMsg.Value),
-			Error: err.Error(),
-		}
 		log.Println(err)
 
+		// Commit message so this bugged message doesn't appear again
 		kafkaIO.MarkOffset() <- eventMsg
-		kafkaIO.ProducerInput() <- kr
 		return
 	}
 
@@ -86,6 +82,13 @@ func processEvent(
 			event.AggregateID,
 		)
 		log.Println(err)
+
+		kr := &model.KafkaResponse{
+			AggregateID: event.AggregateID,
+			Input:       string(eventMsg.Value),
+			Error:       err.Error(),
+		}
+		kafkaIO.ProducerInput() <- kr
 		return
 	}
 	event.Version = aggVersion
@@ -103,8 +106,9 @@ func processEvent(
 		kafkaIO.MarkOffset() <- eventMsg
 	}
 	kr := &model.KafkaResponse{
-		Input: string(eventMsg.Value),
-		Error: errStr,
+		AggregateID: event.AggregateID,
+		Input:       string(eventMsg.Value),
+		Error:       errStr,
 	}
 	kafkaIO.ProducerInput() <- kr
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -130,15 +131,17 @@ func (ka *KafkaAdapter) InitIO() (*KafkaIO, error) {
 					"KafkaResponse: Both Input and Error are empty, " +
 						"atleast one must be non-empty",
 				)
-				log.Fatalln(err)
+				log.Println(err)
 			}
 			msgJSON, err := json.Marshal(msg)
 			if err != nil {
+				// Something went severely wrong
 				err = errors.Wrapf(err, "Error Marshalling KafkaResponse: %s", msg)
 				log.Fatalln(err)
 			}
 
-			producerMsg := producer.CreateMessage(ka.ResponseTopic, msgJSON)
+			resTopic := fmt.Sprintf("%s.%d", ka.ResponseTopic, msg.AggregateID)
+			producerMsg := producer.CreateMessage(resTopic, msgJSON)
 			resProducerInput <- producerMsg
 		}
 	}()

@@ -2,6 +2,7 @@ package test
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"reflect"
@@ -27,6 +28,7 @@ import (
 // * That the generated event is consumed by consumer-topic
 // * That the consumed event is processed, and an adequate response is generated
 // on Kafka response-topic
+// * That the aggregate-version is read and applied from event-meta table
 // * That the processed event gets stored in Cassandra event-store
 func TestEventPersistence(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -54,7 +56,6 @@ var _ = Describe("EventPersistence", func() {
 			brokers = utils.ParseHosts(os.Getenv("KAFKA_BROKERS"))
 			consumerGroupName = os.Getenv("KAFKA_CONSUMER_GROUP")
 			consumerTopic = os.Getenv("KAFKA_CONSUMER_TOPICS")
-			responseTopic = os.Getenv("KAFKA_RESPONSE_TOPIC")
 
 			config := &producer.Config{
 				KafkaBrokers: *brokers,
@@ -78,6 +79,11 @@ var _ = Describe("EventPersistence", func() {
 				Version:     1,
 				YearBucket:  2018,
 			}
+			responseTopic = fmt.Sprintf(
+				"%s.%d",
+				os.Getenv("KAFKA_RESPONSE_TOPIC"),
+				mockEvent.AggregateID,
+			)
 			metaAggVersion = 42
 
 			// Create event-meta table for controlling event-versions

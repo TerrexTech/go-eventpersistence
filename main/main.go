@@ -7,7 +7,6 @@ import (
 
 	"github.com/TerrexTech/go-commonutils/utils"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
-	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 )
@@ -58,11 +57,12 @@ func main() {
 	go func() {
 		for consumerErr := range kafkaIO.ConsumerErrors() {
 			err := errors.Wrap(consumerErr, "Kafka Consumer Error")
-			kr := &model.KafkaResponse{
-				Error: err.Error(),
-			}
-			kafkaIO.ProducerInput() <- kr
-			log.Fatalln(err)
+			log.Println(
+				"Error in event consumer. " +
+					"The events cannot be consumed without a working Kafka Consumer. " +
+					"The service will now exit.",
+			)
+			log.Panicln(err)
 		}
 	}()
 
@@ -71,7 +71,8 @@ func main() {
 		for producerErr := range kafkaIO.ProducerErrors() {
 			err := errors.Wrap(producerErr, "Kafka Producer Error")
 			log.Println(
-				"The responses cannot be produced without a working Kafka Producer. " +
+				"Error in response producer. " +
+					"The responses cannot be produced without a working Kafka Producer. " +
 					"The service will now exit.",
 			)
 			// Healthy Response producer is essential for this service,
@@ -80,18 +81,20 @@ func main() {
 		}
 	}()
 
-	log.Println("Event-Persistence Service Initialized")
-
+	log.Println("Bootstrapping Event table")
 	eventTable, err := bootstrap.Event()
 	if err != nil {
 		err = errors.Wrap(err, "EventTable: Error Creating Table in Cassandra")
 		log.Fatalln(err)
 	}
+	log.Println("Bootstrapping EventMeta table")
 	eventMetaTable, err := bootstrap.EventMeta()
 	if err != nil {
 		err = errors.Wrap(err, "EventMetaTable: Error Creating Table in Cassandra")
 		log.Fatalln(err)
 	}
+
+	log.Println("Event-Persistence Service Initialized")
 
 	// Process Events
 	for eventMsg := range kafkaIO.ConsumerMessages() {
