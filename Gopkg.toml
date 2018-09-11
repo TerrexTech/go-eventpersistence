@@ -30,11 +30,11 @@
 
 [[constraint]]
   name = "github.com/Shopify/sarama"
-  version = "1.17.0"
+  version = "1.18.0"
 
 [[constraint]]
   name = "github.com/TerrexTech/go-cassandrautils"
-  version = "1.1.2"
+  version = "1.2.0"
 
 [[constraint]]
   name = "github.com/TerrexTech/go-commonutils"
@@ -42,11 +42,15 @@
 
 [[constraint]]
   name = "github.com/TerrexTech/go-eventstore-models"
-  version = "1.0.0"
+  version = "1.2.1"
 
 [[constraint]]
   name = "github.com/TerrexTech/go-kafkautils"
-  version = "2.0.0"
+  version = "2.1.1"
+
+[[constraint]]
+  name = "github.com/bsm/sarama-cluster"
+  version = "2.1.15"
 
 [[constraint]]
   branch = "master"
@@ -67,6 +71,10 @@
 [[constraint]]
   name = "github.com/pkg/errors"
   version = "0.8.0"
+
+[[constraint]]
+  name = "github.com/scylladb/gocqlx"
+  version = "1.0.0"
 
 [prune]
   go-tests = true

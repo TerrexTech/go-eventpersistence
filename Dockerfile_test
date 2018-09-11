@@ -20,4 +20,4 @@ RUN dep ensure --vendor-only -v
 
 COPY . ./
 
-ENTRYPOINT go test -v ./... || sleep 100000
+ENTRYPOINT go test -v ./...
