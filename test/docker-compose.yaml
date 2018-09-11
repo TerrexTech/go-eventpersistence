@@ -30,6 +30,7 @@ services:
       - ../.env
     environment:
       CASSANDRA_HOSTS: cassandra:9042
+      # To test with -race arg
       CGO_ENABLED: 0
       KAFKA_BROKERS: kafka:9092
 

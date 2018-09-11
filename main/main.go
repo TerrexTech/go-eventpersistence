@@ -2,11 +2,40 @@ package main
 
 import (
 	"log"
+	"os"
+	"time"
 
-	"github.com/TerrexTech/go-eventstore-models/models"
+	"github.com/TerrexTech/go-commonutils/utils"
+	"github.com/TerrexTech/go-eventstore-models/bootstrap"
+	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 )
+
+// Creates a KafkaIO from KafkaAdapter based on set environment variables.
+func initKafkaIO() (*KafkaIO, error) {
+	brokers := os.Getenv("KAFKA_BROKERS")
+	consumerGroupName := os.Getenv("KAFKA_CONSUMER_GROUP")
+	consumerTopics := os.Getenv("KAFKA_CONSUMER_TOPICS")
+	offsetRetentionDuration := os.Getenv("KAFKA_OFFSET_RETENTION_HOURS")
+	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
+
+	dur, err := time.ParseDuration(offsetRetentionDuration)
+	if err != nil {
+		err = errors.Wrap(err, "Error Parsing Duration for Kafka Offset-Retention")
+		log.Fatalln(err)
+	}
+
+	kafkaAdapter := &KafkaAdapter{
+		Brokers:                 *utils.ParseHosts(brokers),
+		ConsumerGroupName:       consumerGroupName,
+		ConsumerTopics:          *utils.ParseHosts(consumerTopics),
+		OffsetRetentionDuration: dur,
+		ResponseTopic:           responseTopic,
+	}
+
+	return kafkaAdapter.InitIO()
+}
 
 func main() {
 	// Load environment-file.
@@ -25,17 +54,11 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	cassandraIO, err := initCassandraIO()
-	if err != nil {
-		err = errors.Wrap(err, "Error Creating Cassandra Session")
-		log.Fatalln(err)
-	}
-
 	// Handle ConsumerErrors
 	go func() {
 		for consumerErr := range kafkaIO.ConsumerErrors() {
 			err := errors.Wrap(consumerErr, "Kafka Consumer Error")
-			kr := &models.KafkaResponse{
+			kr := &model.KafkaResponse{
 				Error: err.Error(),
 			}
 			kafkaIO.ProducerInput() <- kr
@@ -59,8 +82,19 @@ func main() {
 
 	log.Println("Event-Persistence Service Initialized")
 
+	eventTable, err := bootstrap.Event()
+	if err != nil {
+		err = errors.Wrap(err, "EventTable: Error Creating Table in Cassandra")
+		log.Fatalln(err)
+	}
+	eventMetaTable, err := bootstrap.EventMeta()
+	if err != nil {
+		err = errors.Wrap(err, "EventMetaTable: Error Creating Table in Cassandra")
+		log.Fatalln(err)
+	}
+
 	// Process Events
 	for eventMsg := range kafkaIO.ConsumerMessages() {
-		go processEvent(kafkaIO, cassandraIO, eventMsg)
+		go processEvent(kafkaIO, eventTable, eventMetaTable, eventMsg)
 	}
 }

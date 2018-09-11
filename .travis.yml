@@ -8,6 +8,10 @@ language: go
 go:
   - "1.11"
 
+# Don't go-get dependencies, since we are running everything
+# in docker-containers for testing.
+install: true
+
 # Only clone the most recent commit
 git:
   depth: 1

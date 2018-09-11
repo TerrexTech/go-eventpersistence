@@ -1,4 +1,4 @@
-package persistence
+package main
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"github.com/bsm/sarama-cluster"
 
 	"github.com/Shopify/sarama"
-	"github.com/TerrexTech/go-eventstore-models/models"
+	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/TerrexTech/go-kafkautils/consumer"
 	"github.com/TerrexTech/go-kafkautils/producer"
 	"github.com/pkg/errors"
@@ -22,7 +22,7 @@ type KafkaIO struct {
 	consumerMsgChan    <-chan *sarama.ConsumerMessage
 	consumerOffsetChan chan<- *sarama.ConsumerMessage
 	producerErrChan    <-chan *sarama.ProducerError
-	producerInputChan  chan<- *models.KafkaResponse
+	producerInputChan  chan<- *model.KafkaResponse
 }
 
 // ConsumerErrors returns send-channel where consumer errors are published.
@@ -47,7 +47,7 @@ func (kio *KafkaIO) ProducerErrors() <-chan *sarama.ProducerError {
 }
 
 // ProducerInput returns receive-channel where kafka-responses can be produced.
-func (kio *KafkaIO) ProducerInput() chan<- *models.KafkaResponse {
+func (kio *KafkaIO) ProducerInput() chan<- *model.KafkaResponse {
 	return kio.producerInputChan
 }
 
@@ -115,10 +115,10 @@ func (ka *KafkaAdapter) InitIO() (*KafkaIO, error) {
 	}
 
 	// Setup Producer I/O channels
-	producerInputChan := make(chan *models.KafkaResponse)
+	producerInputChan := make(chan *model.KafkaResponse)
 	kio := &KafkaIO{
 		Adapter:           ka,
-		producerInputChan: (chan<- *models.KafkaResponse)(producerInputChan),
+		producerInputChan: (chan<- *model.KafkaResponse)(producerInputChan),
 		producerErrChan:   resProducer.Errors(),
 	}
 
@@ -138,7 +138,7 @@ func (ka *KafkaAdapter) InitIO() (*KafkaIO, error) {
 				log.Fatalln(err)
 			}
 
-			producerMsg := resProducer.CreateMessage(ka.ResponseTopic, string(msgJSON))
+			producerMsg := producer.CreateMessage(ka.ResponseTopic, msgJSON)
 			resProducerInput <- producerMsg
 		}
 	}()
