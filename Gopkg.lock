@@ -29,7 +29,7 @@
   version = "v2.0"
 
 [[projects]]
-  digest = "1:8607a30b3e20faed8708218c17ff49293d223a5aaa94685bddcc50faef59d681"
+  digest = "1:c2589325ee061773cbbab0518438d5e72e1fe2da6063a91defd6a5b18549940d"
   name = "github.com/TerrexTech/go-eventstore-models"
   packages = [
     "bootstrap",
@@ -37,8 +37,8 @@
     "model",
   ]
   pruneopts = "UT"
-  revision = "9e403822b79319a3fb05f09eb12ae1c8dafb66c5"
-  version = "v1.2.3"
+  revision = "094af6fed25f5636e4828d57966a4936a7a324cb"
+  version = "v1.3.0"
 
 [[projects]]
   digest = "1:0e6a18c6eed37c19e25e23fadbd9714348f0678c32436965d303f77a97b48375"
@@ -135,12 +135,12 @@
   version = "v1.0.0"
 
 [[projects]]
-  digest = "1:70e697d67ccaec45e16bac3a32380ebcd9e7e071079c60d0171d42cf1cf9748a"
+  digest = "1:ecd9aa82687cf31d1585d4ac61d0ba180e42e8a6182b85bd785fcca8dfeefc1b"
   name = "github.com/joho/godotenv"
   packages = ["."]
   pruneopts = "UT"
-  revision = "a79fa1e548e2c689c241d10173efd51e5d689d5b"
-  version = "v1.2.0"
+  revision = "23d116af351c84513e1946b527c88823e476be13"
+  version = "v1.3.0"
 
 [[projects]]
   digest = "1:42e29deef12327a69123b9cb2cb45fee4af5c12c2a23c6e477338279a052703f"
