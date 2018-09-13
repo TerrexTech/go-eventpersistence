@@ -29,7 +29,7 @@
   version = "v2.0"
 
 [[projects]]
-  digest = "1:c2589325ee061773cbbab0518438d5e72e1fe2da6063a91defd6a5b18549940d"
+  digest = "1:50979a36aafb586f5b2d344945b131d8d430997010a681b48c7e916a5007b890"
   name = "github.com/TerrexTech/go-eventstore-models"
   packages = [
     "bootstrap",
@@ -37,8 +37,8 @@
     "model",
   ]
   pruneopts = "UT"
-  revision = "094af6fed25f5636e4828d57966a4936a7a324cb"
-  version = "v1.3.0"
+  revision = "8162f62d56a7c575cd61eb8311e170ba96f0e9ec"
+  version = "v1.4.0"
 
 [[projects]]
   digest = "1:0e6a18c6eed37c19e25e23fadbd9714348f0678c32436965d303f77a97b48375"
@@ -170,7 +170,7 @@
   version = "v1.6.0"
 
 [[projects]]
-  digest = "1:29f294e6a3b9d30629266b2765a8c203056387941e600405b8e8871c84653042"
+  digest = "1:ab54eea8d482272009e9e4af07d4d9b5236c27b4d8c54a3f2c99d163be883eca"
   name = "github.com/onsi/gomega"
   packages = [
     ".",
@@ -187,8 +187,8 @@
     "types",
   ]
   pruneopts = "UT"
-  revision = "b6ea1ea48f981d0f615a154a45eabb9dd466556d"
-  version = "v1.4.1"
+  revision = "7615b9433f86a8bdf29709bf288bc4fd0636a369"
+  version = "v1.4.2"
 
 [[projects]]
   digest = "1:4f0885b3f0dba96128a09a6f4b4231c42688fbd05f323224c6aa5adc9f4e87bf"
@@ -239,7 +239,7 @@
     "html/charset",
   ]
   pruneopts = "UT"
-  revision = "161cd47e91fd58ac17490ef4d742dc98bb4cf60e"
+  revision = "26e67e76b6c3f6ce91f7c52def5af501b4e0f3a2"
 
 [[projects]]
   branch = "master"
