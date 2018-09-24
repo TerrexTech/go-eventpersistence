@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
+	"github.com/TerrexTech/uuuid"
+
 	"github.com/Shopify/sarama"
-	"github.com/TerrexTech/go-commonutils/utils"
+	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
 	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/TerrexTech/go-kafkautils/consumer"
@@ -53,7 +54,7 @@ var _ = Describe("EventPersistence", func() {
 			err := godotenv.Load("../.env")
 			Expect(err).ToNot(HaveOccurred())
 
-			brokers = utils.ParseHosts(os.Getenv("KAFKA_BROKERS"))
+			brokers = commonutil.ParseHosts(os.Getenv("KAFKA_BROKERS"))
 			consumerGroupName = os.Getenv("KAFKA_CONSUMER_GROUP")
 			consumerTopic = os.Getenv("KAFKA_CONSUMER_TOPICS")
 
@@ -66,16 +67,18 @@ var _ = Describe("EventPersistence", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			log.Println("Generating random uuid")
-			uuid, err := cql.RandomUUID()
+			eventUUID, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
+			userUUID, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 
 			mockEvent = &model.Event{
 				Action:      "insert",
 				AggregateID: 1,
-				Data:        "test-data",
+				Data:        []byte("test-data"),
 				Timestamp:   time.Now(),
-				UserID:      1,
-				UUID:        uuid,
+				UserUUID:    userUUID,
+				UUID:        eventUUID,
 				Version:     1,
 				YearBucket:  2018,
 			}
@@ -89,10 +92,10 @@ var _ = Describe("EventPersistence", func() {
 			// Create event-meta table for controlling event-versions
 			metaTable, err := bootstrap.EventMeta()
 			Expect(err).ToNot(HaveOccurred())
-			metaData := model.EventMeta{
+			metaData := &model.EventMeta{
 				AggregateVersion: metaAggVersion,
 				AggregateID:      mockEvent.AggregateID,
-				YearBucket:       mockEvent.YearBucket,
+				PartitionKey:     0,
 			}
 			err = <-metaTable.AsyncInsert(metaData)
 			Expect(err).ToNot(HaveOccurred())
@@ -113,9 +116,10 @@ var _ = Describe("EventPersistence", func() {
 
 	Context("An event is produced", func() {
 		var (
-			responseConsumer *consumer.Consumer
-			session          *cql.Session
-			tableName        string
+			responseConsumer   *consumer.Consumer
+			session            *cql.Session
+			eventTableName     string
+			eventMetaTableName string
 		)
 		BeforeEach(func() {
 			var err error
@@ -136,10 +140,11 @@ var _ = Describe("EventPersistence", func() {
 			username := os.Getenv("CASSANDRA_USERNAME")
 			password := os.Getenv("CASSANDRA_PASSWORD")
 			keyspaceName := os.Getenv("CASSANDRA_KEYSPACE")
-			tableName = os.Getenv("CASSANDRA_EVENT_TABLE")
+			eventTableName = os.Getenv("CASSANDRA_EVENT_TABLE")
+			eventMetaTableName = os.Getenv("CASSANDRA_EVENT_META_TABLE")
 
 			// Create Cassandra Session
-			cluster := cql.NewCluster(*utils.ParseHosts(hosts)...)
+			cluster := cql.NewCluster(*commonutil.ParseHosts(hosts)...)
 			cluster.ConnectTimeout = time.Millisecond * 1000
 			cluster.Timeout = time.Millisecond * 1000
 			cluster.Keyspace = keyspaceName
@@ -178,7 +183,6 @@ var _ = Describe("EventPersistence", func() {
 					// Mark the message-offset since we do not want the
 					// same message to appear again in later tests.
 					responseConsumer.MarkOffset(msg, "")
-					// Context is added to this error (using errors.Wrap) later below
 					err := responseConsumer.SaramaConsumerGroup().CommitOffsets()
 					err = errors.Wrap(err, "Error Committing Offsets for message")
 					Expect(err).ToNot(HaveOccurred())
@@ -186,6 +190,7 @@ var _ = Describe("EventPersistence", func() {
 					// Unmarshal the Kafka-Response
 					log.Println("An Event was received, now verifying")
 					response := &model.KafkaResponse{}
+					log.Println(string(msg.Value))
 					err = json.Unmarshal(msg.Value, response)
 
 					Expect(err).ToNot(HaveOccurred())
@@ -209,7 +214,7 @@ var _ = Describe("EventPersistence", func() {
 			log.Println("Checking if the event was correctly stored in event-store")
 
 			// Try fetching the MockEvent from Database, we should have a matching event
-			stmt, columns := qb.Select(tableName).Where(
+			stmt, columns := qb.Select(eventTableName).Where(
 				qb.Eq("year_bucket"),
 				qb.Eq("aggregate_id"),
 				qb.Eq("version"),
@@ -239,34 +244,38 @@ var _ = Describe("EventPersistence", func() {
 			Expect(actualEvent.UUID).To(Equal(mockEvent.UUID))
 		})
 
-		It("should not insert event if the AggregateID is missing in EventMeta-Table", func() {
-			log.Println("Ensure that event is not inserted into table if Aggregate ID is absent.")
+		It("should create entry in EventMeta table if AggregareID is absent", func() {
+			log.Println(
+				"Ensure that it adds AggregateID to EventMeta table if it doesn't exist.",
+			)
 			// Just a random ID that's most likely not present in event-meta table
 			// at time of this testing
-			mockEvent.AggregateID = 34
+			mockEvent.AggregateID = 79
 			event, err := json.Marshal(mockEvent)
 			Expect(err).ToNot(HaveOccurred())
 			mockEventInput <- producer.CreateMessage(consumerTopic, event)
 
-			stmt, columns := qb.Select(tableName).Where(
-				qb.Eq("year_bucket"),
+			log.Println("Waiting for dummy event to be processed")
+			time.Sleep(5 * time.Second)
+			stmt, columns := qb.Select(eventMetaTableName).Where(
+				qb.Eq("partition_key"),
 				qb.Eq("aggregate_id"),
 			).ToCql()
 
+			eventMetaValues := &model.EventMeta{
+				AggregateID:  mockEvent.AggregateID,
+				PartitionKey: 0,
+			}
+
 			q := session.Query(stmt)
-			q = cqlx.Query(q, columns).BindStruct(mockEvent).Query
+			q = cqlx.Query(q, columns).BindStruct(eventMetaValues).Query
 
 			iter := cqlx.Iter(q)
-			bind := make([]model.Event, 1)
+			bind := make([]model.EventMeta, 1)
 			err = iter.Select(&bind)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(bind).To(HaveLen(1))
 
-			blankEvent := model.Event{}
-			// We initialize "bind" slice with 1 element with zero values
-			// So that element should still have zero values if no results were found
-			isBindBlank := reflect.DeepEqual(bind[0], blankEvent)
-			Expect(isBindBlank).To(BeTrue())
+			Expect(bind[0].AggregateID).To(Equal(mockEvent.AggregateID))
 		})
 	})
 })

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 
 	csndra "github.com/TerrexTech/go-cassandrautils/cassandra"
@@ -27,19 +26,27 @@ func decodeEvent(eventMsg *sarama.ConsumerMessage) (*model.Event, error) {
 
 func getAggVersion(
 	eventMetaTable *csndra.Table,
-	yearBucket int16,
+	partitionKey int8,
 	aggregateID int8,
 ) (int64, error) {
 	resultsBind := []model.EventMeta{}
+	partitionKeyCol, err := eventMetaTable.Column("partitionKey")
+	if err != nil {
+		return -1, errors.New(`Expected column "partitionKey" not found`)
+	}
+	aggregateIDCol, err := eventMetaTable.Column("aggregateID")
+	if err != nil {
+		return -1, errors.New(`Expected column "aggregateID" not found`)
+	}
 	sp := csndra.SelectParams{
 		ColumnValues: []csndra.ColumnComparator{
-			csndra.Comparator("year_bucket", yearBucket).Eq(),
-			csndra.Comparator("aggregate_id", aggregateID).Eq(),
+			csndra.Comparator(partitionKeyCol, partitionKey).Eq(),
+			csndra.Comparator(aggregateIDCol, aggregateID).Eq(),
 		},
 		ResultsBind:   &resultsBind,
 		SelectColumns: []string{"aggregate_version"},
 	}
-	_, err := eventMetaTable.Select(sp)
+	_, err = eventMetaTable.Select(sp)
 	if err != nil {
 		err = errors.Wrap(err, "Error Fetching Latest Event-Version from EventMeta")
 		return -1, err
@@ -51,12 +58,22 @@ func getAggVersion(
 		)
 	}
 	if len(resultsBind) == 0 {
-		return -1, fmt.Errorf("EventsMeta: No versions found for AggregateID: %d", aggregateID)
+		meta := model.EventMeta{
+			AggregateVersion: 0,
+			AggregateID:      aggregateID,
+			PartitionKey:     partitionKey,
+		}
+		err = <-eventMetaTable.AsyncInsert(&meta)
+		if err != nil {
+			return -1, err
+		}
+		return meta.AggregateVersion, nil
 	}
 	return resultsBind[0].AggregateVersion, nil
 }
 
 func processEvent(
+	metaPartitionKey int8,
 	kafkaIO *KafkaIO,
 	eventTable *csndra.Table,
 	eventMetaTable *csndra.Table,
@@ -66,7 +83,7 @@ func processEvent(
 	event, err := decodeEvent(eventMsg)
 	if err != nil {
 		// Kafka-Response informing that the Unmarshalling was unsuccessful.
-		err = errors.Wrap(err, "Error Unmarshalling Event-string to Event-struct")
+		err = errors.Wrap(err, "Error Unmarshalling Event-data to Event-struct")
 		log.Println(err)
 
 		// Commit message so this bugged message doesn't appear again
@@ -74,7 +91,7 @@ func processEvent(
 		return
 	}
 
-	aggVersion, err := getAggVersion(eventMetaTable, 2018, event.AggregateID)
+	aggVersion, err := getAggVersion(eventMetaTable, metaPartitionKey, event.AggregateID)
 	if err != nil {
 		err = errors.Wrapf(
 			err,
@@ -85,7 +102,7 @@ func processEvent(
 
 		kr := &model.KafkaResponse{
 			AggregateID: event.AggregateID,
-			Input:       string(eventMsg.Value),
+			Input:       eventMsg.Value,
 			Error:       err.Error(),
 		}
 		kafkaIO.ProducerInput() <- kr
@@ -107,7 +124,7 @@ func processEvent(
 	}
 	kr := &model.KafkaResponse{
 		AggregateID: event.AggregateID,
-		Input:       string(eventMsg.Value),
+		Input:       eventMsg.Value,
 		Error:       errStr,
 	}
 	kafkaIO.ProducerInput() <- kr

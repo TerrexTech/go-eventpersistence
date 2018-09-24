@@ -21,15 +21,15 @@
   version = "v1.2.0"
 
 [[projects]]
-  digest = "1:f446f7e9171044d853ff08a894e733cdb66538a32b6a66b2bce5de7c691897a2"
+  digest = "1:dcade65c88d17fe1841540f1f1f841941cf11f153a26fad02451f263a71490f1"
   name = "github.com/TerrexTech/go-commonutils"
-  packages = ["utils"]
+  packages = ["commonutil"]
   pruneopts = "UT"
-  revision = "ee7a939084fdb644ca3f925275195b170610f3e3"
-  version = "v2.0"
+  revision = "bec34e895c0ef90d7b0452f141691767356ae6e4"
+  version = "v3.0.0"
 
 [[projects]]
-  digest = "1:50979a36aafb586f5b2d344945b131d8d430997010a681b48c7e916a5007b890"
+  digest = "1:1078106c9aa3a8945291c628edea82746457f9e4ddaf5961f53ccb5bbcc9e32e"
   name = "github.com/TerrexTech/go-eventstore-models"
   packages = [
     "bootstrap",
@@ -37,8 +37,8 @@
     "model",
   ]
   pruneopts = "UT"
-  revision = "8162f62d56a7c575cd61eb8311e170ba96f0e9ec"
-  version = "v1.4.0"
+  revision = "9b4575ca3fcd809e52972b5e3827cf1e58ca757c"
+  version = "v2.0.0"
 
 [[projects]]
   digest = "1:0e6a18c6eed37c19e25e23fadbd9714348f0678c32436965d303f77a97b48375"
@@ -50,6 +50,14 @@
   pruneopts = "UT"
   revision = "b3655b22f8a269a2a35e9b4e96c57fa0f9fe7b3c"
   version = "v2.1.1"
+
+[[projects]]
+  digest = "1:ce36c38655294f7a1c19b96c01ef0e94a843773e289de557c754dc3756c514a4"
+  name = "github.com/TerrexTech/uuuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "a29ab526ee6513a1fd0195b41a921f305298b1c2"
+  version = "v1.0.0"
 
 [[projects]]
   digest = "1:526d64d0a3ac6c24875724a9355895be56a21f89a5d3ab5ba88d91244269a7d8"
@@ -93,7 +101,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:df4c8d34661526e022df63dce90c6a5cf05bcb09562593b09277bb6aab7bbec9"
+  digest = "1:41cbe73cce1dd0e86e2223ca5deecf41c374643c82ec2b56f78bc4e7cad24f83"
   name = "github.com/gocql/gocql"
   packages = [
     ".",
@@ -102,7 +110,15 @@
     "internal/streams",
   ]
   pruneopts = "UT"
-  revision = "e898b2baaf086eead546b4a2fadfb552e18ee330"
+  revision = "799fb0373110eaa4e2e71dd32a9b5903f80dca8f"
+
+[[projects]]
+  digest = "1:ce579162ae1341f3e5ab30c0dce767f28b1eb6a81359aad01723f1ba6b4becdf"
+  name = "github.com/gofrs/uuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "370558f003bfe29580cd0f698d8640daccdcc45c"
+  version = "v3.1.1"
 
 [[projects]]
   branch = "master"
@@ -231,7 +247,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:8bc7ff3c61fb32fe0bf7dfe7158b434608a562f891bf9b4ff1f1c2fa8cfe48e2"
+  digest = "1:c85f5fc06e706d2e47979c95633d90e1293356446c876383d466f0054d19e731"
   name = "golang.org/x/net"
   packages = [
     "html",
@@ -239,15 +255,15 @@
     "html/charset",
   ]
   pruneopts = "UT"
-  revision = "26e67e76b6c3f6ce91f7c52def5af501b4e0f3a2"
+  revision = "2f5d2388922f370f4355f327fcf4cfe9f5583908"
 
 [[projects]]
   branch = "master"
-  digest = "1:6eb2645d74b43d9c87b51947df39f7c668a4f422cd512053f7f6f75bfaad0197"
+  digest = "1:6c54cefa33de85c47075aae30f1d1a333967c405272010bb76aa943467e4cbae"
   name = "golang.org/x/sys"
   packages = ["unix"]
   pruneopts = "UT"
-  revision = "d0be0721c37eeb5299f245a996a483160fc36940"
+  revision = "d47a0f3392421c5624713c9a19fe781f651f8a50"
 
 [[projects]]
   digest = "1:aa4d6967a3237f8367b6bf91503964a77183ecf696f1273e8ad3551bb4412b5f"
@@ -314,13 +330,14 @@
   input-imports = [
     "github.com/Shopify/sarama",
     "github.com/TerrexTech/go-cassandrautils/cassandra",
-    "github.com/TerrexTech/go-commonutils/utils",
+    "github.com/TerrexTech/go-commonutils/commonutil",
     "github.com/TerrexTech/go-eventstore-models/bootstrap",
     "github.com/TerrexTech/go-eventstore-models/model",
     "github.com/TerrexTech/go-kafkautils/consumer",
     "github.com/TerrexTech/go-kafkautils/producer",
     "github.com/bsm/sarama-cluster",
     "github.com/gocql/gocql",
+    "github.com/gofrs/uuid",
     "github.com/joho/godotenv",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
