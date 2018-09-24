@@ -18,7 +18,6 @@ import (
 // KafkaIO provides channels for interacting with Kafka.
 // Note: All receive-channels must be read from to prevent deadlock.
 type KafkaIO struct {
-	Adapter            *KafkaAdapter
 	consumerErrChan    <-chan error
 	consumerMsgChan    <-chan *sarama.ConsumerMessage
 	consumerOffsetChan chan<- *sarama.ConsumerMessage
@@ -118,7 +117,6 @@ func (ka *KafkaAdapter) InitIO() (*KafkaIO, error) {
 	// Setup Producer I/O channels
 	producerInputChan := make(chan *model.KafkaResponse)
 	kio := &KafkaIO{
-		Adapter:           ka,
 		producerInputChan: (chan<- *model.KafkaResponse)(producerInputChan),
 		producerErrChan:   resProducer.Errors(),
 	}
@@ -126,17 +124,10 @@ func (ka *KafkaAdapter) InitIO() (*KafkaIO, error) {
 	// The Kafka-Response post-processing the consumed events
 	go func() {
 		for msg := range producerInputChan {
-			if msg.Input == "" && msg.Error == "" {
-				err = errors.New(
-					"KafkaResponse: Both Input and Error are empty, " +
-						"atleast one must be non-empty",
-				)
-				log.Println(err)
-			}
 			msgJSON, err := json.Marshal(msg)
 			if err != nil {
 				// Something went severely wrong
-				err = errors.Wrapf(err, "Error Marshalling KafkaResponse: %s", msg)
+				err = errors.Wrapf(err, "Error Marshalling KafkaResponse for topic %s", msg.Topic)
 				log.Fatalln(err)
 			}
 

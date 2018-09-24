@@ -3,13 +3,56 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
-	"github.com/TerrexTech/go-commonutils/utils"
+	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 )
+
+var metaParitionKey int8
+
+func initService() {
+	// Load environment-file.
+	// Env vars will be read directly from environment if this file fails loading
+	err := godotenv.Load()
+	if err != nil {
+		err = errors.Wrap(err,
+			".env file not found, env-vars will be read as set in environment",
+		)
+		log.Println(err)
+	}
+
+	missingVar, err := commonutil.ValidateEnv(
+		"CASSANDRA_HOSTS",
+		"CASSANDRA_DATA_CENTERS",
+		"CASSANDRA_KEYSPACE",
+		"CASSANDRA_EVENT_TABLE",
+		"CASSANDRA_EVENT_META_TABLE",
+		"CASSANDRA_EVENT_META_PARTITION_KEY",
+
+		"KAFKA_BROKERS",
+		"KAFKA_CONSUMER_GROUP",
+		"KAFKA_CONSUMER_TOPICS",
+		"KAFKA_OFFSET_RETENTION_HOURS",
+		"KAFKA_RESPONSE_TOPIC",
+	)
+
+	if err != nil {
+		err = errors.Wrapf(err, "Env-var %s is required, but is not set", missingVar)
+		log.Fatalln(err)
+	}
+
+	pKeyVar := "CASSANDRA_EVENT_META_PARTITION_KEY"
+	pKey, err := strconv.Atoi(os.Getenv(pKeyVar))
+	if err != nil {
+		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
+		log.Fatalln(err)
+	}
+	metaParitionKey = int8(pKey)
+}
 
 // Creates a KafkaIO from KafkaAdapter based on set environment variables.
 func initKafkaIO() (*KafkaIO, error) {
@@ -26,9 +69,9 @@ func initKafkaIO() (*KafkaIO, error) {
 	}
 
 	kafkaAdapter := &KafkaAdapter{
-		Brokers:                 *utils.ParseHosts(brokers),
+		Brokers:                 *commonutil.ParseHosts(brokers),
 		ConsumerGroupName:       consumerGroupName,
-		ConsumerTopics:          *utils.ParseHosts(consumerTopics),
+		ConsumerTopics:          *commonutil.ParseHosts(consumerTopics),
 		OffsetRetentionDuration: dur,
 		ResponseTopic:           responseTopic,
 	}
@@ -37,16 +80,7 @@ func initKafkaIO() (*KafkaIO, error) {
 }
 
 func main() {
-	// Load environment-file.
-	// Env vars will be read directly from environment if this file fails loading
-	err := godotenv.Load()
-	if err != nil {
-		err = errors.Wrap(err,
-			".env file not found, env-vars will be read as set in environment",
-		)
-		log.Println(err)
-	}
-
+	initService()
 	kafkaIO, err := initKafkaIO()
 	if err != nil {
 		err = errors.Wrap(err, "Error in KafkaIO Init")
@@ -98,6 +132,6 @@ func main() {
 
 	// Process Events
 	for eventMsg := range kafkaIO.ConsumerMessages() {
-		go processEvent(kafkaIO, eventTable, eventMetaTable, eventMsg)
+		go processEvent(metaParitionKey, kafkaIO, eventTable, eventMetaTable, eventMsg)
 	}
 }
