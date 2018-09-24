@@ -32,11 +32,15 @@ func getAggVersion(
 	resultsBind := []model.EventMeta{}
 	partitionKeyCol, err := eventMetaTable.Column("partitionKey")
 	if err != nil {
-		return -1, errors.New(`Expected column "partitionKey" not found`)
+		return -1, errors.New(`Expected column "{artitionKey" not found`)
 	}
 	aggregateIDCol, err := eventMetaTable.Column("aggregateID")
 	if err != nil {
-		return -1, errors.New(`Expected column "aggregateID" not found`)
+		return -1, errors.New(`Expected column "AggregateID" not found`)
+	}
+	aggVerCol, err := eventMetaTable.Column("aggregateVersion")
+	if err != nil {
+		return -1, errors.New(`Error: Column "AggregateVersion" not found`)
 	}
 	sp := csndra.SelectParams{
 		ColumnValues: []csndra.ColumnComparator{
@@ -44,7 +48,7 @@ func getAggVersion(
 			csndra.Comparator(aggregateIDCol, aggregateID).Eq(),
 		},
 		ResultsBind:   &resultsBind,
-		SelectColumns: []string{"aggregate_version"},
+		SelectColumns: []string{aggVerCol},
 	}
 	_, err = eventMetaTable.Select(sp)
 	if err != nil {
@@ -101,9 +105,10 @@ func processEvent(
 		log.Println(err)
 
 		kr := &model.KafkaResponse{
-			AggregateID: event.AggregateID,
-			Input:       eventMsg.Value,
-			Error:       err.Error(),
+			AggregateID:   event.AggregateID,
+			CorrelationID: event.CorrelationID,
+			Input:         eventMsg.Value,
+			Error:         err.Error(),
 		}
 		kafkaIO.ProducerInput() <- kr
 		return
@@ -123,9 +128,10 @@ func processEvent(
 		kafkaIO.MarkOffset() <- eventMsg
 	}
 	kr := &model.KafkaResponse{
-		AggregateID: event.AggregateID,
-		Input:       eventMsg.Value,
-		Error:       errStr,
+		AggregateID:   event.AggregateID,
+		CorrelationID: event.CorrelationID,
+		Input:         eventMsg.Value,
+		Error:         errStr,
 	}
 	kafkaIO.ProducerInput() <- kr
 }
