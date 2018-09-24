@@ -29,7 +29,7 @@
   version = "v3.0.0"
 
 [[projects]]
-  digest = "1:1078106c9aa3a8945291c628edea82746457f9e4ddaf5961f53ccb5bbcc9e32e"
+  digest = "1:7c2d7c882ed4c331e90d4cd0da0e0ba1f875dc78ada48f00d089e0e89c51d9b5"
   name = "github.com/TerrexTech/go-eventstore-models"
   packages = [
     "bootstrap",
@@ -37,8 +37,8 @@
     "model",
   ]
   pruneopts = "UT"
-  revision = "9b4575ca3fcd809e52972b5e3827cf1e58ca757c"
-  version = "v2.0.0"
+  revision = "6c883ace87454f91d3249c3010223883e0d73b13"
+  version = "v2.0.1"
 
 [[projects]]
   digest = "1:0e6a18c6eed37c19e25e23fadbd9714348f0678c32436965d303f77a97b48375"
@@ -101,7 +101,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:41cbe73cce1dd0e86e2223ca5deecf41c374643c82ec2b56f78bc4e7cad24f83"
+  digest = "1:4983e4c61e3eba9414809b35c44efa9e46ca329a745a307ae36ef60898b242ca"
   name = "github.com/gocql/gocql"
   packages = [
     ".",
@@ -110,7 +110,7 @@
     "internal/streams",
   ]
   pruneopts = "UT"
-  revision = "799fb0373110eaa4e2e71dd32a9b5903f80dca8f"
+  revision = "843d9a6e022dbaafac6ddedfcb88c3a9e48b960b"
 
 [[projects]]
   digest = "1:ce579162ae1341f3e5ab30c0dce767f28b1eb6a81359aad01723f1ba6b4becdf"
@@ -335,9 +335,9 @@
     "github.com/TerrexTech/go-eventstore-models/model",
     "github.com/TerrexTech/go-kafkautils/consumer",
     "github.com/TerrexTech/go-kafkautils/producer",
+    "github.com/TerrexTech/uuuid",
     "github.com/bsm/sarama-cluster",
     "github.com/gocql/gocql",
-    "github.com/gofrs/uuid",
     "github.com/joho/godotenv",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",

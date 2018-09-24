@@ -72,15 +72,18 @@ var _ = Describe("EventPersistence", func() {
 			userUUID, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
 
+			cid, err := uuuid.NewV4()
+			Expect(err).ToNot(HaveOccurred())
 			mockEvent = &model.Event{
-				Action:      "insert",
-				AggregateID: 1,
-				Data:        []byte("test-data"),
-				Timestamp:   time.Now(),
-				UserUUID:    userUUID,
-				UUID:        eventUUID,
-				Version:     1,
-				YearBucket:  2018,
+				Action:        "insert",
+				AggregateID:   1,
+				CorrelationID: cid,
+				Data:          []byte("test-data"),
+				Timestamp:     time.Now(),
+				UserUUID:      userUUID,
+				UUID:          eventUUID,
+				Version:       1,
+				YearBucket:    2018,
 			}
 			responseTopic = fmt.Sprintf(
 				"%s.%d",
@@ -202,7 +205,10 @@ var _ = Describe("EventPersistence", func() {
 					Expect(err).ToNot(HaveOccurred())
 
 					// Check if the event is the one we are looking for
-					if msgEvent.UUID == mockEvent.UUID {
+					// Just CorrelationID is enough here, but lets go the extra step anyway
+					cidMatch := msgEvent.CorrelationID == mockEvent.CorrelationID
+					uuidMatch := msgEvent.UUID == mockEvent.UUID
+					if cidMatch && uuidMatch {
 						log.Println("The event matched the expectations")
 						close(done)
 					}
