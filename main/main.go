@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"strconv"
-	"time"
+
+	"github.com/TerrexTech/go-kafkautils/kafka"
 
 	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
@@ -12,9 +14,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-var metaParitionKey int8
-
-func initService() {
+// validateEnv checks if all required environment-variables are set.
+func validateEnv() {
 	// Load environment-file.
 	// Env vars will be read directly from environment if this file fails loading
 	err := godotenv.Load()
@@ -36,8 +37,9 @@ func initService() {
 		"KAFKA_BROKERS",
 		"KAFKA_CONSUMER_GROUP",
 		"KAFKA_CONSUMER_TOPICS",
-		"KAFKA_OFFSET_RETENTION_HOURS",
 		"KAFKA_RESPONSE_TOPIC",
+
+		"VALID_EVENT_ACTIONS",
 	)
 
 	if err != nil {
@@ -45,76 +47,65 @@ func initService() {
 		log.Fatalln(err)
 	}
 
-	pKeyVar := "CASSANDRA_EVENT_META_PARTITION_KEY"
-	pKey, err := strconv.Atoi(os.Getenv(pKeyVar))
-	if err != nil {
-		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
-		log.Fatalln(err)
-	}
-	metaParitionKey = int8(pKey)
-}
-
-// Creates a KafkaIO from KafkaAdapter based on set environment variables.
-func initKafkaIO() (*KafkaIO, error) {
-	brokers := os.Getenv("KAFKA_BROKERS")
-	consumerGroupName := os.Getenv("KAFKA_CONSUMER_GROUP")
-	consumerTopics := os.Getenv("KAFKA_CONSUMER_TOPICS")
-	offsetRetentionDuration := os.Getenv("KAFKA_OFFSET_RETENTION_HOURS")
-	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
-
-	dur, err := time.ParseDuration(offsetRetentionDuration)
-	if err != nil {
-		err = errors.Wrap(err, "Error Parsing Duration for Kafka Offset-Retention")
-		log.Fatalln(err)
-	}
-
-	kafkaAdapter := &KafkaAdapter{
-		Brokers:                 *commonutil.ParseHosts(brokers),
-		ConsumerGroupName:       consumerGroupName,
-		ConsumerTopics:          *commonutil.ParseHosts(consumerTopics),
-		OffsetRetentionDuration: dur,
-		ResponseTopic:           responseTopic,
-	}
-
-	return kafkaAdapter.InitIO()
 }
 
 func main() {
-	initService()
-	kafkaIO, err := initKafkaIO()
+	validateEnv()
+
+	// ======> Setup Kafka
+	brokersStr := os.Getenv("KAFKA_BROKERS")
+	brokers := *commonutil.ParseHosts(brokersStr)
+
+	consumerGroup := os.Getenv("KAFKA_CONSUMER_GROUP")
+	eventTopicStr := os.Getenv("KAFKA_CONSUMER_TOPICS")
+	eventTopic := *commonutil.ParseHosts(eventTopicStr)
+	// Event Consumer
+	eventConsumer, err := kafka.NewConsumer(&kafka.ConsumerConfig{
+		GroupName:    consumerGroup,
+		KafkaBrokers: brokers,
+		Topics:       eventTopic,
+	})
 	if err != nil {
-		err = errors.Wrap(err, "Error in KafkaIO Init")
+		err = errors.Wrap(err, "Error creating Kafka Event-Consumer")
 		log.Fatalln(err)
 	}
 
 	// Handle ConsumerErrors
 	go func() {
-		for consumerErr := range kafkaIO.ConsumerErrors() {
-			err := errors.Wrap(consumerErr, "Kafka Consumer Error")
+		for err := range eventConsumer.Errors() {
+			err = errors.Wrap(err, "Kafka Consumer Error")
 			log.Println(
 				"Error in event consumer. " +
 					"The events cannot be consumed without a working Kafka Consumer. " +
 					"The service will now exit.",
 			)
-			log.Panicln(err)
+			log.Fatalln(err)
 		}
 	}()
 
+	// Response Producer
+	responseProducer, err := kafka.NewProducer(&kafka.ProducerConfig{
+		KafkaBrokers: brokers,
+	})
+	if err != nil {
+		err = errors.Wrap(err, "Error creating Kafka Response-Producer")
+		log.Fatalln(err)
+	}
+
 	// Handle ProducerErrors
 	go func() {
-		for producerErr := range kafkaIO.ProducerErrors() {
-			err := errors.Wrap(producerErr, "Kafka Producer Error")
+		for prodErr := range responseProducer.Errors() {
+			err = errors.Wrap(prodErr.Err, "Kafka Producer Error")
 			log.Println(
 				"Error in response producer. " +
 					"The responses cannot be produced without a working Kafka Producer. " +
 					"The service will now exit.",
 			)
-			// Healthy Response producer is essential for this service,
-			// else there will be no responses for Kafka events
-			log.Panicln(err)
+			log.Fatalln(err)
 		}
 	}()
 
+	// ======> Create/Load Cassandra Keyspace/Tables
 	log.Println("Bootstrapping Event table")
 	eventTable, err := bootstrap.Event()
 	if err != nil {
@@ -128,10 +119,45 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	// ======> Setup EventStore
+	pKeyVar := "CASSANDRA_EVENT_META_PARTITION_KEY"
+	metaPartitionKey, err := strconv.Atoi(os.Getenv(pKeyVar))
+	if err != nil {
+		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
+		log.Fatalln(err)
+	}
+
+	eventStore, err := NewEventStore(eventTable, eventMetaTable, int8(metaPartitionKey))
+	if err != nil {
+		err = errors.Wrap(err, "Error while initializing EventStore")
+		log.Fatalln(err)
+	}
+
+	// ======> Setup EventHandler
+	validActionsStr := os.Getenv("VALID_EVENT_ACTIONS")
+	validActions := *commonutil.ParseHosts(validActionsStr)
+	if err != nil {
+		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
+		log.Fatalln(err)
+	}
+	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
+
+	handler, err := NewEventHandler(EventHandlerConfig{
+		EventStore:       eventStore,
+		ResponseProducer: responseProducer,
+		ResponseTopic:    responseTopic,
+		ValidActions:     validActions,
+	})
+	if err != nil {
+		err = errors.Wrap(err, "Error while initializing EventHandler")
+		log.Fatalln(err)
+	}
+
 	log.Println("Event-Persistence Service Initialized")
 
-	// Process Events
-	for eventMsg := range kafkaIO.ConsumerMessages() {
-		go processEvent(metaParitionKey, kafkaIO, eventTable, eventMetaTable, eventMsg)
+	err = eventConsumer.Consume(context.Background(), handler)
+	if err != nil {
+		err = errors.Wrap(err, "Error while attempting to consume Events")
+		log.Fatalln(err)
 	}
 }

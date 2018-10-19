@@ -9,7 +9,7 @@ This service handles persisting/storing the system-generated events into Cassand
 
 * This event is then processed, which includes Marshalling it into [Event][0] model and inserting it into Cassandra Event-Store.
 
-* The post-processing result is published to a Kafka Topic (`event.rns_eventstore.events.persistence.response.<aggregate-id>`), which is based on [Kafka-Response][1] model. The event-producer must consume this result (by listening on the respective Kafka-Topic), check for errors, and proceed accordingly.
+* The post-processing result is published to a Kafka Topic (`event.persistence.response.<aggregate-id>`), which is based on [Kafka-Response][1] model. The event-producer must consume this result (by listening on the respective Kafka-Topic), check for errors, and proceed accordingly.
 
 Check [.env][2] and [docker-compose.yaml][3] (docker-compose is only used in tests as of yet) files for default configurations (including the Cassandra Keyspace/Table used).
 
