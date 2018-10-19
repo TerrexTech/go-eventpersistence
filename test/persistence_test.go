@@ -1,21 +1,17 @@
 package test
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/TerrexTech/uuuid"
-
-	"github.com/Shopify/sarama"
 	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
 	"github.com/TerrexTech/go-eventstore-models/model"
-	"github.com/TerrexTech/go-kafkautils/consumer"
-	"github.com/TerrexTech/go-kafkautils/producer"
+	"github.com/TerrexTech/uuuid"
 	cql "github.com/gocql/gocql"
 	"github.com/joho/godotenv"
 	. "github.com/onsi/ginkgo"
@@ -25,6 +21,10 @@ import (
 	"github.com/scylladb/gocqlx/qb"
 )
 
+func Byf(s string, args ...interface{}) {
+	By(fmt.Sprintf(s, args...))
+}
+
 // This suite tests the following:
 // * That the generated event is consumed by consumer-topic
 // * That the consumed event is processed, and an adequate response is generated
@@ -32,248 +32,317 @@ import (
 // * That the aggregate-version is read and applied from event-meta table
 // * That the processed event gets stored in Cassandra event-store
 func TestEventPersistence(t *testing.T) {
+	log.Println("Reading environment file")
+	err := godotenv.Load("../.env")
+	if err != nil {
+		err = errors.Wrap(err,
+			".env file not found, env-vars will be read as set in environment",
+		)
+		log.Println(err)
+	}
+
+	missingVar, err := commonutil.ValidateEnv(
+		"CASSANDRA_HOSTS",
+		"CASSANDRA_KEYSPACE",
+		"CASSANDRA_EVENT_TABLE",
+		"CASSANDRA_EVENT_META_TABLE",
+
+		"KAFKA_BROKERS",
+		"KAFKA_CONSUMER_GROUP",
+		"KAFKA_CONSUMER_TOPICS",
+	)
+	if err != nil {
+		err = errors.Wrapf(err, "Env-var %s is required, but is not set", missingVar)
+		log.Fatalln(err)
+	}
+
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "EventPersistence Suite")
 }
 
 var _ = Describe("EventPersistence", func() {
 	var (
-		brokers           *[]string
-		consumerGroupName string
-		consumerTopic     string
-		responseTopic     string
+		testUtil  *EventTestUtil
+		mockEvent model.Event
 
-		mockEvent      *model.Event
-		mockEventInput chan<- *sarama.ProducerMessage
-		metaAggVersion int64
+		eventMetaTableName string
+		metaAggVersion     int64
 	)
 
 	BeforeSuite(func() {
-		Describe("An event is produced", func() {
-			log.Println("Reading environment file")
-			err := godotenv.Load("../.env")
-			Expect(err).ToNot(HaveOccurred())
+		var err error
+		// =============> Cassandra Configuration
+		hosts := os.Getenv("CASSANDRA_HOSTS")
+		username := os.Getenv("CASSANDRA_USERNAME")
+		password := os.Getenv("CASSANDRA_PASSWORD")
+		keyspaceName := os.Getenv("CASSANDRA_KEYSPACE")
+		eventTableName := os.Getenv("CASSANDRA_EVENT_TABLE")
+		eventMetaTableName = os.Getenv("CASSANDRA_EVENT_META_TABLE")
 
-			brokers = commonutil.ParseHosts(os.Getenv("KAFKA_BROKERS"))
-			consumerGroupName = os.Getenv("KAFKA_CONSUMER_GROUP")
-			consumerTopic = os.Getenv("KAFKA_CONSUMER_TOPICS")
+		// Create Cassandra Session
+		cluster := cql.NewCluster(*commonutil.ParseHosts(hosts)...)
+		cluster.ConnectTimeout = time.Millisecond * 1000
+		cluster.Timeout = time.Millisecond * 1000
+		cluster.Keyspace = keyspaceName
+		cluster.ProtoVersion = 4
 
-			config := &producer.Config{
-				KafkaBrokers: *brokers,
+		if username != "" && password != "" {
+			cluster.Authenticator = cql.PasswordAuthenticator{
+				Username: username,
+				Password: password,
 			}
+		}
 
-			log.Println("Creating Kafka mock-event Producer")
-			kafkaProducer, err := producer.New(config)
-			Expect(err).ToNot(HaveOccurred())
+		session, err := cluster.CreateSession()
+		Expect(err).ToNot(HaveOccurred())
 
-			log.Println("Generating random uuid")
-			eventUUID, err := uuuid.NewV4()
-			Expect(err).ToNot(HaveOccurred())
-			userUUID, err := uuuid.NewV4()
-			Expect(err).ToNot(HaveOccurred())
+		// =============> Kafka Configuration
+		brokers := *commonutil.ParseHosts(os.Getenv("KAFKA_BROKERS"))
+		consumerGroupName := os.Getenv("KAFKA_CONSUMER_GROUP") + "-test"
+		consumerTopicStr := os.Getenv("KAFKA_CONSUMER_TOPICS")
+		consumerTopics := *commonutil.ParseHosts(consumerTopicStr)
+		responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
 
-			cid, err := uuuid.NewV4()
-			Expect(err).ToNot(HaveOccurred())
-			mockEvent = &model.Event{
-				Action:        "insert",
-				AggregateID:   1,
-				CorrelationID: cid,
-				Data:          []byte("test-data"),
-				Timestamp:     time.Now(),
-				UserUUID:      userUUID,
-				UUID:          eventUUID,
-				Version:       1,
-				YearBucket:    2018,
-			}
-			responseTopic = fmt.Sprintf(
-				"%s.%d",
-				os.Getenv("KAFKA_RESPONSE_TOPIC"),
-				mockEvent.AggregateID,
+		eventUUID, err := uuuid.NewV1()
+		Expect(err).ToNot(HaveOccurred())
+		userUUID, err := uuuid.NewV4()
+		Expect(err).ToNot(HaveOccurred())
+		cid, err := uuuid.NewV4()
+		Expect(err).ToNot(HaveOccurred())
+		mockEvent = model.Event{
+			Action:        "insert",
+			AggregateID:   1,
+			CorrelationID: cid,
+			Data:          []byte("test-data"),
+			Timestamp:     time.Now(),
+			UserUUID:      userUUID,
+			TimeUUID:      eventUUID,
+			Version:       1,
+			YearBucket:    2018,
+		}
+
+		testUtil = &EventTestUtil{
+			KafkaBrokers:      brokers,
+			ConsumerGroupName: consumerGroupName,
+			ConsumerTopic:     responseTopic,
+			EventsTopic:       consumerTopics[0],
+
+			EventTableName: eventTableName,
+			CQLSession:     session,
+
+			Writer: Byf,
+		}
+
+		// Create event-meta table for controlling event-versions
+		metaAggVersion = 42
+		metaTable, err := bootstrap.EventMeta()
+		Expect(err).ToNot(HaveOccurred())
+		metaData := &model.EventMeta{
+			AggregateVersion: metaAggVersion,
+			AggregateID:      mockEvent.AggregateID,
+			PartitionKey:     0,
+		}
+		err = <-metaTable.AsyncInsert(metaData)
+		Expect(err).ToNot(HaveOccurred())
+	})
+
+	Describe("A valid event is produced", func() {
+		Context("Event-Action is insert", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should be persisted",
+				func(done Done) {
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					Byf("Producing Event")
+					testUtil.Produce(mockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							mockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Persisting Event")
+					err := testUtil.DidStore(mockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
 			)
-			metaAggVersion = 42
+		})
 
-			// Create event-meta table for controlling event-versions
-			metaTable, err := bootstrap.EventMeta()
-			Expect(err).ToNot(HaveOccurred())
-			metaData := &model.EventMeta{
-				AggregateVersion: metaAggVersion,
-				AggregateID:      mockEvent.AggregateID,
-				PartitionKey:     0,
-			}
-			err = <-metaTable.AsyncInsert(metaData)
-			Expect(err).ToNot(HaveOccurred())
+		Context("Event-Action is delete", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should be persisted",
+				func(done Done) {
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
 
-			// Produce event on Kafka topic
-			log.Println("Marshalling mock-event to json")
-			testEventMsg, err := json.Marshal(mockEvent)
-			Expect(err).ToNot(HaveOccurred())
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
 
-			log.Println("Fetching input-channel from mock-event producer")
-			mockEventInput, err = kafkaProducer.Input()
-			Expect(err).ToNot(HaveOccurred())
+					mockEvent.Action = "delete"
 
-			mockEventInput <- producer.CreateMessage(consumerTopic, testEventMsg)
-			log.Println("Produced mock-event on consumer-topic")
+					Byf("Producing Event")
+					testUtil.Produce(mockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							mockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Persisting Event")
+					err := testUtil.DidStore(mockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
+			)
+		})
+
+		Context("Event-Action is query", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should be persisted",
+				func(done Done) {
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					mockEvent.Action = "query"
+
+					Byf("Producing Event")
+					testUtil.Produce(mockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							mockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Persisting Event")
+					err := testUtil.DidStore(mockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
+			)
+		})
+
+		Context("Event-Action is update", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should be persisted",
+				func(done Done) {
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					mockEvent.Action = "update"
+
+					Byf("Producing Event")
+					testUtil.Produce(mockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							mockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Persisting Event")
+					err := testUtil.DidStore(mockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
+			)
 		})
 	})
 
-	Context("An event is produced", func() {
-		var (
-			responseConsumer   *consumer.Consumer
-			session            *cql.Session
-			eventTableName     string
-			eventMetaTableName string
+	It("should create entry in EventMeta table if AggregareID is absent", func() {
+		Byf(
+			"Ensuring that it adds AggregateID to EventMeta table if it doesn't exist.",
 		)
-		BeforeEach(func() {
-			var err error
 
-			// =====> Setup Kafka
-			if responseConsumer == nil {
-				consumerConfig := &consumer.Config{
-					ConsumerGroup: consumerGroupName,
-					KafkaBrokers:  *brokers,
-					Topics:        []string{responseTopic},
-				}
-				responseConsumer, err = consumer.New(consumerConfig)
-				Expect(err).ToNot(HaveOccurred())
-			}
-
-			// =====> Setup Cassandra
-			hosts := os.Getenv("CASSANDRA_HOSTS")
-			username := os.Getenv("CASSANDRA_USERNAME")
-			password := os.Getenv("CASSANDRA_PASSWORD")
-			keyspaceName := os.Getenv("CASSANDRA_KEYSPACE")
-			eventTableName = os.Getenv("CASSANDRA_EVENT_TABLE")
-			eventMetaTableName = os.Getenv("CASSANDRA_EVENT_META_TABLE")
-
-			// Create Cassandra Session
-			cluster := cql.NewCluster(*commonutil.ParseHosts(hosts)...)
-			cluster.ConnectTimeout = time.Millisecond * 1000
-			cluster.Timeout = time.Millisecond * 1000
-			cluster.Keyspace = keyspaceName
-			cluster.ProtoVersion = 4
-
-			if username != "" && password != "" {
-				cluster.Authenticator = cql.PasswordAuthenticator{
-					Username: username,
-					Password: password,
-				}
-			}
-
-			session, err = cluster.CreateSession()
-			Expect(err).ToNot(HaveOccurred())
-		})
-
-		Specify("no errors should appear on response-consumer", func() {
-			go func() {
-				defer GinkgoRecover()
-				for consumerErr := range responseConsumer.Errors() {
-					Expect(consumerErr).ToNot(HaveOccurred())
-				}
-			}()
-		})
-
-		// This test will run in a go-routine, and must succeed within 10 seconds
-		Specify(
-			"the mock-event processing-result should appear on Kafka response-topic",
-			func(done Done) {
-				log.Println(
-					"Checking if the Kafka response-topic received the event, " +
-						"with timeout of 10 seconds",
-				)
-
-				for msg := range responseConsumer.Messages() {
-					// Mark the message-offset since we do not want the
-					// same message to appear again in later tests.
-					responseConsumer.MarkOffset(msg, "")
-					err := responseConsumer.SaramaConsumerGroup().CommitOffsets()
-					err = errors.Wrap(err, "Error Committing Offsets for message")
-					Expect(err).ToNot(HaveOccurred())
-
-					// Unmarshal the Kafka-Response
-					log.Println("An Event was received, now verifying")
-					response := &model.KafkaResponse{}
-					log.Println(string(msg.Value))
-					err = json.Unmarshal(msg.Value, response)
-
-					Expect(err).ToNot(HaveOccurred())
-					Expect(response.Error).To(BeEmpty())
-
-					// Unmarshal the Input from Kafka-Response
-					msgEvent := &model.Event{}
-					err = json.Unmarshal([]byte(response.Input), msgEvent)
-					Expect(err).ToNot(HaveOccurred())
-
-					// Check if the event is the one we are looking for
-					// Just CorrelationID is enough here, but lets go the extra step anyway
-					cidMatch := msgEvent.CorrelationID == mockEvent.CorrelationID
-					uuidMatch := msgEvent.UUID == mockEvent.UUID
-					if cidMatch && uuidMatch {
-						log.Println("The event matched the expectations")
-						close(done)
-					}
-				}
-			}, 10)
-
-		Specify("the event should be stored in Cassandra event-store", func() {
-
-			log.Println("Checking if the event was correctly stored in event-store")
-
-			// Try fetching the MockEvent from Database, we should have a matching event
-			stmt, columns := qb.Select(eventTableName).Where(
-				qb.Eq("year_bucket"),
-				qb.Eq("aggregate_id"),
-				qb.Eq("version"),
-				qb.Eq("action"),
-				qb.Eq("timestamp"),
-				qb.Eq("uuid"),
-			).ToCql()
-
-			q := session.Query(stmt)
-			mockEvent.Version = metaAggVersion
-			q = cqlx.Query(q, columns).BindStruct(mockEvent).Query
-
-			iter := cqlx.Iter(q)
-			event := make([]model.Event, 1)
-			err := iter.Select(&event)
-			Expect(err).ToNot(HaveOccurred())
-
-			// Although just getting the event proves that the event got
-			// saved to Database, but lets just still compare it for
-			// satisfactory purposes.
-			actualEvent := event[0]
-			Expect(actualEvent.YearBucket).To(Equal(mockEvent.YearBucket))
-			Expect(actualEvent.AggregateID).To(Equal(mockEvent.AggregateID))
-			Expect(actualEvent.Version).To(Equal(metaAggVersion))
-			Expect(actualEvent.Action).To(Equal(mockEvent.Action))
-			Expect(actualEvent.Timestamp.Unix()).To(Equal(mockEvent.Timestamp.Unix()))
-			Expect(actualEvent.UUID).To(Equal(mockEvent.UUID))
-		})
-
-		It("should create entry in EventMeta table if AggregareID is absent", func() {
-			log.Println(
-				"Ensure that it adds AggregateID to EventMeta table if it doesn't exist.",
-			)
+		// Test with three random values for more surity
+		for i := 0; i < 3; i++ {
 			// Just a random ID that's most likely not present in event-meta table
 			// at time of this testing
-			mockEvent.AggregateID = 79
-			event, err := json.Marshal(mockEvent)
-			Expect(err).ToNot(HaveOccurred())
-			mockEventInput <- producer.CreateMessage(consumerTopic, event)
+			minID := 10
+			maxID := 100
+			s1 := rand.NewSource(time.Now().UnixNano())
+			r1 := rand.New(s1)
+			aggID := int8(r1.Intn(maxID-minID) + minID)
+			mockEvent.AggregateID = aggID
 
-			log.Println("Waiting for dummy event to be processed")
+			timeuid, err := uuuid.NewV1()
+			Expect(err).ToNot(HaveOccurred())
+			mockEvent.TimeUUID = timeuid
+
+			Byf("inserting AggregateID %d", aggID)
+
+			errorChan := make(chan error)
+			go func() {
+				defer GinkgoRecover()
+				for err := range errorChan {
+					Expect(err).ToNot(HaveOccurred())
+				}
+			}()
+			testUtil.Produce(mockEvent, errorChan)
+
+			Byf("Processing MockEvent")
 			time.Sleep(5 * time.Second)
 			stmt, columns := qb.Select(eventMetaTableName).Where(
 				qb.Eq("partition_key"),
 				qb.Eq("aggregate_id"),
 			).ToCql()
 
+			Byf("Checking if Entry was created")
 			eventMetaValues := &model.EventMeta{
-				AggregateID:  mockEvent.AggregateID,
-				PartitionKey: 0,
+				AggregateID:      mockEvent.AggregateID,
+				AggregateVersion: 1,
+				PartitionKey:     0,
 			}
-
-			q := session.Query(stmt)
+			q := testUtil.CQLSession.Query(stmt)
 			q = cqlx.Query(q, columns).BindStruct(eventMetaValues).Query
 
 			iter := cqlx.Iter(q)
@@ -282,6 +351,175 @@ var _ = Describe("EventPersistence", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(bind[0].AggregateID).To(Equal(mockEvent.AggregateID))
+		}
+	})
+
+	Describe("An invalid event is produced", func() {
+		Context("an event with invalid action is generated", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should not be persisted",
+				func(done Done) {
+					cid, err := uuuid.NewV4()
+					Expect(err).ToNot(HaveOccurred())
+					timeuid, err := uuuid.NewV1()
+					Expect(err).ToNot(HaveOccurred())
+
+					invalidMockEvent := mockEvent
+					invalidMockEvent.AggregateID = 1
+					invalidMockEvent.Action = "InvalidAction"
+					invalidMockEvent.CorrelationID = cid
+					invalidMockEvent.TimeUUID = timeuid
+
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					Byf("Producing Event")
+					testUtil.Produce(invalidMockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							invalidMockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Not Persisting Event")
+					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
+			)
+		})
+
+		Context("an event with missing UUID is generated", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should not be persisted",
+				func(done Done) {
+					invalidMockEvent := mockEvent
+					invalidMockEvent.TimeUUID = uuuid.UUID{}
+
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					Byf("Producing Event")
+					testUtil.Produce(invalidMockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							invalidMockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Not Persisting Event")
+					err := testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
+					Expect(err).To(HaveOccurred())
+					close(done)
+				}, 30,
+			)
+		})
+
+		Context("an event with TimeUUID V1 is generated", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should not be persisted",
+				func(done Done) {
+					timeuid, err := uuuid.NewV4()
+					Expect(err).ToNot(HaveOccurred())
+
+					invalidMockEvent := mockEvent
+					invalidMockEvent.TimeUUID = timeuid
+
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						defer GinkgoRecover()
+						for err := range errorChan {
+							Expect(err).ToNot(HaveOccurred())
+						}
+					}()
+
+					Byf("Producing Event")
+					testUtil.Produce(invalidMockEvent, errorChan)
+
+					Byf("Processing Event")
+					go func() {
+						testUtil.DidConsume(
+							invalidMockEvent,
+							20,
+							(chan<- *model.KafkaResponse)(responseChan),
+							errorChan,
+						)
+					}()
+					<-responseChan
+
+					Byf("Not Persisting Event")
+					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
+					Expect(err).To(HaveOccurred())
+					close(done)
+				}, 30,
+			)
+		})
+
+		Context("an event with missing AggregateID is generated", func() {
+			Specify(
+				"result should appear on Kafka response-topic and event should not be persisted",
+				func(done Done) {
+					timeuid, err := uuuid.NewV1()
+					Expect(err).ToNot(HaveOccurred())
+
+					invalidMockEvent := mockEvent
+					invalidMockEvent.AggregateID = 0
+					invalidMockEvent.TimeUUID = timeuid
+
+					responseChan := make(chan *model.KafkaResponse)
+					errorChan := make(chan error)
+
+					go func() {
+						for _ = range errorChan {
+							// Ignore errors because we dont care about timeouts here
+						}
+					}()
+
+					Byf("Producing Event")
+					testUtil.Produce(invalidMockEvent, errorChan)
+
+					Byf("Processing Event")
+					testUtil.DidConsume(
+						invalidMockEvent,
+						20,
+						(chan<- *model.KafkaResponse)(responseChan),
+						errorChan,
+					)
+
+					Byf("Not Persisting Event")
+					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
+					close(done)
+				}, 30,
+			)
 		})
 	})
 })
