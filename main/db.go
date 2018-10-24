@@ -6,6 +6,8 @@ import (
 	"github.com/pkg/errors"
 )
 
+// EventStore represents the core functions required
+// to interact with EventStore for persisting events.
 type EventStore interface {
 	GetAggVersion(aggregateID int8) (int64, error)
 	CommitEvent(event *model.Event) error
@@ -17,6 +19,7 @@ type eventStore struct {
 	metaPartitionKey int8
 }
 
+// NewEventStore creates a new EventStore implementation from provided configuration.
 func NewEventStore(
 	eventTable *csndra.Table,
 	eventMetaTable *csndra.Table,
@@ -76,7 +79,7 @@ func (es *eventStore) GetAggVersion(aggregateID int8) (int64, error) {
 	}
 	if len(resultsBind) == 0 {
 		meta := model.EventMeta{
-			AggregateVersion: 1,
+			AggregateVersion: 2,
 			AggregateID:      aggregateID,
 			PartitionKey:     es.metaPartitionKey,
 		}
