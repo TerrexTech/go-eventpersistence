@@ -3,7 +3,7 @@
 cd test
 echo "===> Changing directory to \"./test\""
 
-docker-compose up -d --build cassandra kafka
+docker-compose up -d --build --force-recreate cassandra zookeeper kafka
 
 function ping_cassandra() {
   docker exec -it cassandra /opt/bitnami/cassandra/bin/nodetool status | grep UN
@@ -43,10 +43,17 @@ do
   sleep 1
 done
 
-docker-compose up -d --build go-eventpersistence
+docker-compose up -d --build --force-recreate go-logsink
+
+docker-compose up -d --build --force-recreate go-eventpersistence
 
 # echo "Waiting for Go-API Sessions to initialize"
 sleep 5
 
 # Run the tests
-docker-compose up --build go-eventpersistence-test
+docker-compose up --exit-code-from go-eventpersistence
+rc=$?
+if [[ $rc != 0 ]]
+  docker ps -a
+  then exit $rc
+fi

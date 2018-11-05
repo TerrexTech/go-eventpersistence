@@ -103,20 +103,20 @@ var _ = Describe("EventPersistence", func() {
 		consumerTopics := *commonutil.ParseHosts(consumerTopicStr)
 		responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
 
-		eventUUID, err := uuuid.NewV1()
+		eventUUID, err := uuuid.NewV4()
 		Expect(err).ToNot(HaveOccurred())
 		userUUID, err := uuuid.NewV4()
 		Expect(err).ToNot(HaveOccurred())
 		cid, err := uuuid.NewV4()
 		Expect(err).ToNot(HaveOccurred())
 		mockEvent = model.Event{
-			Action:        "insert",
+			EventAction:   "insert",
 			AggregateID:   1,
 			CorrelationID: cid,
 			Data:          []byte("test-data"),
-			Timestamp:     time.Now(),
+			NanoTime:      time.Now().UnixNano(),
 			UserUUID:      userUUID,
-			TimeUUID:      eventUUID,
+			UUID:          eventUUID,
 			Version:       1,
 			YearBucket:    2018,
 		}
@@ -147,7 +147,7 @@ var _ = Describe("EventPersistence", func() {
 	})
 
 	Describe("A valid event is produced", func() {
-		Context("Event-Action is insert", func() {
+		Context("Event-EventAction is insert", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
@@ -183,7 +183,7 @@ var _ = Describe("EventPersistence", func() {
 			)
 		})
 
-		Context("Event-Action is delete", func() {
+		Context("Event-EventAction is delete", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
@@ -197,7 +197,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.Action = "delete"
+					mockEvent.EventAction = "delete"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -221,7 +221,7 @@ var _ = Describe("EventPersistence", func() {
 			)
 		})
 
-		Context("Event-Action is query", func() {
+		Context("Event-EventAction is query", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
@@ -235,7 +235,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.Action = "query"
+					mockEvent.EventAction = "query"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -259,7 +259,7 @@ var _ = Describe("EventPersistence", func() {
 			)
 		})
 
-		Context("Event-Action is update", func() {
+		Context("Event-EventAction is update", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
@@ -273,7 +273,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.Action = "update"
+					mockEvent.EventAction = "update"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -314,9 +314,9 @@ var _ = Describe("EventPersistence", func() {
 			aggID := int8(r1.Intn(maxID-minID) + minID)
 			mockEvent.AggregateID = aggID
 
-			timeuid, err := uuuid.NewV1()
+			uuid, err := uuuid.NewV4()
 			Expect(err).ToNot(HaveOccurred())
-			mockEvent.TimeUUID = timeuid
+			mockEvent.UUID = uuid
 
 			Byf("inserting AggregateID %d", aggID)
 
@@ -361,14 +361,14 @@ var _ = Describe("EventPersistence", func() {
 				func(done Done) {
 					cid, err := uuuid.NewV4()
 					Expect(err).ToNot(HaveOccurred())
-					timeuid, err := uuuid.NewV1()
+					uuid, err := uuuid.NewV4()
 					Expect(err).ToNot(HaveOccurred())
 
 					invalidMockEvent := mockEvent
 					invalidMockEvent.AggregateID = 1
-					invalidMockEvent.Action = "InvalidAction"
+					invalidMockEvent.EventAction = "InvalidEventAction"
 					invalidMockEvent.CorrelationID = cid
-					invalidMockEvent.TimeUUID = timeuid
+					invalidMockEvent.UUID = uuid
 
 					responseChan := make(chan *model.KafkaResponse)
 					errorChan := make(chan error)
@@ -402,12 +402,12 @@ var _ = Describe("EventPersistence", func() {
 			)
 		})
 
-		Context("an event with missing UUID is generated", func() {
+		Context("an event with missing NanoTime is generated", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should not be persisted",
 				func(done Done) {
 					invalidMockEvent := mockEvent
-					invalidMockEvent.TimeUUID = uuuid.UUID{}
+					invalidMockEvent.NanoTime = 0
 
 					responseChan := make(chan *model.KafkaResponse)
 					errorChan := make(chan error)
@@ -435,21 +435,18 @@ var _ = Describe("EventPersistence", func() {
 
 					Byf("Not Persisting Event")
 					err := testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
-					Expect(err).To(HaveOccurred())
+					Expect(err).ToNot(HaveOccurred())
 					close(done)
 				}, 30,
 			)
 		})
 
-		Context("an event with TimeUUID V1 is generated", func() {
+		Context("an event with missing UUID is generated", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should not be persisted",
 				func(done Done) {
-					timeuid, err := uuuid.NewV4()
-					Expect(err).ToNot(HaveOccurred())
-
 					invalidMockEvent := mockEvent
-					invalidMockEvent.TimeUUID = timeuid
+					invalidMockEvent.UUID = uuuid.UUID{}
 
 					responseChan := make(chan *model.KafkaResponse)
 					errorChan := make(chan error)
@@ -476,8 +473,8 @@ var _ = Describe("EventPersistence", func() {
 					<-responseChan
 
 					Byf("Not Persisting Event")
-					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
-					Expect(err).To(HaveOccurred())
+					err := testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
+					Expect(err).ToNot(HaveOccurred())
 					close(done)
 				}, 30,
 			)
@@ -487,12 +484,12 @@ var _ = Describe("EventPersistence", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should not be persisted",
 				func(done Done) {
-					timeuid, err := uuuid.NewV1()
+					uuid, err := uuuid.NewV4()
 					Expect(err).ToNot(HaveOccurred())
 
 					invalidMockEvent := mockEvent
 					invalidMockEvent.AggregateID = 0
-					invalidMockEvent.TimeUUID = timeuid
+					invalidMockEvent.UUID = uuid
 
 					responseChan := make(chan *model.KafkaResponse)
 					errorChan := make(chan error)
