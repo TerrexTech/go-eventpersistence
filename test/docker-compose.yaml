@@ -6,6 +6,13 @@ version: '3.4'
 # Kafka, and Cassandra before go-eventpersistence can be started and used.
 # See the run_test.sh file.
 services:
+  go-logsink:
+    image: terrextech/go-logsink:v1.0.0
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_LOG_CONSUMER_GROP: log.sink.1
+      KAFKA_LOG_CONSUMER_TOPIC: log.sink
+
   go-eventpersistence:
     build:
       context: ../

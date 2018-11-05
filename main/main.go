@@ -6,10 +6,12 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/TerrexTech/go-kafkautils/kafka"
+	"github.com/TerrexTech/go-eventstore-models/model"
 
 	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
+	"github.com/TerrexTech/go-kafkautils/kafka"
+	logtrsnpt "github.com/TerrexTech/go-logtransport/log"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 )
@@ -27,6 +29,9 @@ func validateEnv() {
 	}
 
 	missingVar, err := commonutil.ValidateEnv(
+		"SERVICE_NAME",
+		"KAFKA_LOG_PRODUCER_TOPIC",
+
 		"CASSANDRA_HOSTS",
 		"CASSANDRA_DATA_CENTERS",
 		"CASSANDRA_KEYSPACE",
@@ -49,6 +54,16 @@ func validateEnv() {
 
 }
 
+func errToLogEntry(err error) model.LogEntry {
+	return model.LogEntry{
+		Description:   err.Error(),
+		ErrorCode:     1,
+		Level:         "ERROR",
+		EventAction:   "",
+		ServiceAction: "",
+	}
+}
+
 func main() {
 	validateEnv()
 
@@ -59,6 +74,14 @@ func main() {
 	consumerGroup := os.Getenv("KAFKA_CONSUMER_GROUP")
 	eventTopicStr := os.Getenv("KAFKA_CONSUMER_TOPICS")
 	eventTopic := *commonutil.ParseHosts(eventTopicStr)
+
+	logTopic := os.Getenv("KAFKA_LOG_PRODUCER_TOPIC")
+	serviceName := os.Getenv("SERVICE_NAME")
+	prodConfig := &kafka.ProducerConfig{
+		KafkaBrokers: brokers,
+	}
+	logger, err := logtrsnpt.Init(nil, serviceName, prodConfig, logTopic)
+
 	// Event Consumer
 	eventConsumer, err := kafka.NewConsumer(&kafka.ConsumerConfig{
 		GroupName:    consumerGroup,
@@ -67,6 +90,7 @@ func main() {
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error creating Kafka Event-Consumer")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
@@ -79,29 +103,25 @@ func main() {
 					"The events cannot be consumed without a working Kafka Consumer. " +
 					"The service will now exit.",
 			)
+			logger.Log(errToLogEntry(err))
 			log.Fatalln(err)
 		}
 	}()
 
 	// Response Producer
-	responseProducer, err := kafka.NewProducer(&kafka.ProducerConfig{
-		KafkaBrokers: brokers,
-	})
+	responseProducer, err := kafka.NewProducer(prodConfig)
 	if err != nil {
-		err = errors.Wrap(err, "Error creating Kafka Response-Producer")
+		err = errors.Wrap(err, "Error creating Response-Producer")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
 	// Handle ProducerErrors
 	go func() {
 		for prodErr := range responseProducer.Errors() {
-			err = errors.Wrap(prodErr.Err, "Kafka Producer Error")
-			log.Println(
-				"Error in response producer. " +
-					"The responses cannot be produced without a working Kafka Producer. " +
-					"The service will now exit.",
-			)
-			log.Fatalln(err)
+			err = errors.Wrap(prodErr.Err, "Response-Producer Error")
+			logger.Log(errToLogEntry(err))
+			log.Println(err)
 		}
 	}()
 
@@ -109,13 +129,15 @@ func main() {
 	log.Println("Bootstrapping Event table")
 	eventTable, err := bootstrap.Event()
 	if err != nil {
-		err = errors.Wrap(err, "EventTable: Error Creating Table in Cassandra")
+		err = errors.Wrap(err, "EventTable: Error getting Table from Cassandra")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 	log.Println("Bootstrapping EventMeta table")
 	eventMetaTable, err := bootstrap.EventMeta()
 	if err != nil {
-		err = errors.Wrap(err, "EventMetaTable: Error Creating Table in Cassandra")
+		err = errors.Wrap(err, "EventMetaTable: Error getting Table from Cassandra")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
@@ -124,32 +146,32 @@ func main() {
 	metaPartitionKey, err := strconv.Atoi(os.Getenv(pKeyVar))
 	if err != nil {
 		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
 	eventStore, err := NewEventStore(eventTable, eventMetaTable, int8(metaPartitionKey))
 	if err != nil {
-		err = errors.Wrap(err, "Error while initializing EventStore")
+		err = errors.Wrap(err, "EventStore: Error while initializing EventStore")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
 	// ======> Setup EventHandler
 	validActionsStr := os.Getenv("VALID_EVENT_ACTIONS")
 	validActions := *commonutil.ParseHosts(validActionsStr)
-	if err != nil {
-		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
-		log.Fatalln(err)
-	}
 	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
 
 	handler, err := NewEventHandler(EventHandlerConfig{
 		EventStore:       eventStore,
+		Logger:           logger,
 		ResponseProducer: responseProducer,
 		ResponseTopic:    responseTopic,
 		ValidActions:     validActions,
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error while initializing EventHandler")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 
@@ -158,6 +180,7 @@ func main() {
 	err = eventConsumer.Consume(context.Background(), handler)
 	if err != nil {
 		err = errors.Wrap(err, "Error while attempting to consume Events")
+		logger.Log(errToLogEntry(err))
 		log.Fatalln(err)
 	}
 }

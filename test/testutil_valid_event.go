@@ -17,6 +17,7 @@ import (
 	"github.com/scylladb/gocqlx/qb"
 )
 
+// EventTestUtil creates convenient Kafka consumer/producer for testing event-persistence.
 type EventTestUtil struct {
 	KafkaBrokers      []string
 	ConsumerGroupName string
@@ -29,6 +30,7 @@ type EventTestUtil struct {
 	Writer func(s string, args ...interface{})
 }
 
+// Produce produces the provided mockEvent on EventsTopic.
 func (t *EventTestUtil) Produce(mockEvent model.Event, errorChan chan<- error) {
 	t.Writer("Creating Kafka mock-event Producer")
 	producer, err := kafka.NewProducer(&kafka.ProducerConfig{
@@ -51,10 +53,12 @@ func (t *EventTestUtil) Produce(mockEvent model.Event, errorChan chan<- error) {
 	t.Writer("Producing mock-event on event-consumer topic")
 	mockEventInput <- kafka.CreateMessage(t.EventsTopic, mockEventMsg)
 
-	log.Printf("Produced Event with ID: %s", mockEvent.TimeUUID)
+	log.Printf("Produced Event with ID: %s", mockEvent.UUID)
 	producer.Close()
 }
 
+// DidConsume creates a consumer on ConsumerTopic which
+// checks if the topic receives the provided MockEvent.
 func (t *EventTestUtil) DidConsume(
 	mockEvent model.Event,
 	timeoutSec int,
@@ -98,7 +102,7 @@ func (t *EventTestUtil) DidConsume(
 
 		// Check if the event is the one we are looking for
 		cidMatch := response.CorrelationID == mockEvent.CorrelationID
-		uuidMatch := response.UUID == mockEvent.TimeUUID
+		uuidMatch := response.UUID == mockEvent.UUID
 		if cidMatch && uuidMatch {
 			responseChan <- response
 			responseConsumer.Close()
@@ -116,14 +120,15 @@ func (t *EventTestUtil) DidConsume(
 	responseConsumer.Consume(ctx, handler)
 }
 
+// DidStore checks if the provided MockEvent is stored in Cassandra.
 func (t *EventTestUtil) DidStore(mockEvent model.Event, aggVersion int64) error {
 	// Try fetching the MockEvent from Database, we should have a matching event
 	stmt, columns := qb.Select(t.EventTableName).Where(
 		qb.Eq("year_bucket"),
 		qb.Eq("aggregate_id"),
 		qb.Eq("version"),
-		qb.Eq("time_uuid"),
-		qb.Eq("action"),
+		qb.Eq("nano_time"),
+		qb.Eq("uuid"),
 	).ToCql()
 
 	mockEvent.Version = aggVersion
@@ -149,14 +154,14 @@ func (t *EventTestUtil) DidStore(mockEvent model.Event, aggVersion int64) error 
 	if actualEvent.AggregateID != mockEvent.AggregateID {
 		return errors.New("AggregateID mismatch")
 	}
-	if actualEvent.Action != mockEvent.Action {
-		return errors.New("Action mismatch")
+	if actualEvent.EventAction != mockEvent.EventAction {
+		return errors.New("EventAction mismatch")
 	}
-	if actualEvent.Timestamp.Unix() != mockEvent.Timestamp.Unix() {
-		return errors.New("Timestamp mismatch")
+	if actualEvent.NanoTime != mockEvent.NanoTime {
+		return errors.New("NanoTime mismatch")
 	}
-	if actualEvent.TimeUUID != mockEvent.TimeUUID {
-		return errors.New("TimeUUID mismatch")
+	if actualEvent.UUID != mockEvent.UUID {
+		return errors.New("UUID mismatch")
 	}
 	if actualEvent.Version != aggVersion {
 		return errors.New("Version mismatch")
@@ -165,14 +170,15 @@ func (t *EventTestUtil) DidStore(mockEvent model.Event, aggVersion int64) error 
 	return nil
 }
 
+// DidNotStore checks if the provided (invalid) MockEvent is not stored in Cassandra.
 func (t *EventTestUtil) DidNotStore(mockEvent model.Event, aggVersion int64) error {
 	// Try fetching the MockEvent from Database, we should have a matching event
 	stmt, columns := qb.Select(t.EventTableName).Where(
 		qb.Eq("year_bucket"),
 		qb.Eq("aggregate_id"),
 		qb.Eq("version"),
-		qb.Eq("time_uuid"),
-		qb.Eq("action"),
+		qb.Eq("nano_time"),
+		qb.Eq("uuid"),
 	).ToCql()
 
 	mockEvent.Version = aggVersion
