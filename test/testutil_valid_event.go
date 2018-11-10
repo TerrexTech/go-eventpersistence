@@ -71,9 +71,10 @@ func (t *EventTestUtil) DidConsume(
 	)
 
 	consumerTopic := fmt.Sprintf(
-		"%s.%d",
+		"%s.%d.%s",
 		t.ConsumerTopic,
 		mockEvent.AggregateID,
+		mockEvent.EventAction,
 	)
 
 	t.Writer("Consuming on Topic: %s", consumerTopic)

@@ -6,43 +6,8 @@ version: '3.4'
 # Kafka, and Cassandra before go-eventpersistence can be started and used.
 # See the run_test.sh file.
 services:
-  go-logsink:
-    image: terrextech/go-logsink:v1.0.0
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      KAFKA_LOG_CONSUMER_GROP: log.sink.1
-      KAFKA_LOG_CONSUMER_TOPIC: log.sink
-
-  go-eventpersistence:
-    build:
-      context: ../
-      dockerfile: Dockerfile
-      args:
-        SOURCE_REPO: go-eventpersistence
-    env_file:
-      - ../.env
-    environment:
-      CASSANDRA_HOSTS: cassandra:9042
-      CGO_ENABLED: 0
-      GOOS: linux
-      KAFKA_BROKERS: kafka:9092
-
-  go-eventpersistence-test:
-    build:
-      context: ../
-      dockerfile: Dockerfile_test
-      args:
-        SOURCE_REPO: go-eventpersistence
-    env_file:
-      - ../.env
-    environment:
-      CASSANDRA_HOSTS: cassandra:9042
-      # To test with -race arg
-      CGO_ENABLED: 0
-      KAFKA_BROKERS: kafka:9092
-
   cassandra:
-    image: bitnami/cassandra:latest
+    image: cassandra
     container_name: cassandra
     ports:
       - "9042:9042"
@@ -63,3 +28,30 @@ services:
     container_name: zookeeper
     ports:
       - "2181:2181"
+
+  go-logsink:
+    image: terrextech/go-logsink:v1.0.1
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_LOG_CONSUMER_GROUP: log.sink.1
+      KAFKA_LOG_CONSUMER_TOPIC: log.sink
+
+  go-eventpersistence:
+    build:
+      context: ../
+      dockerfile: Dockerfile_test
+      args:
+        SOURCE_REPO: go-eventpersistence
+    image: go-eventpersistence
+    env_file:
+      - ../.env
+    environment:
+      CGO_ENABLED: 1
+
+  go-eventpersistence-test:
+    image: go-eventpersistence
+    command: go test -v -race ./...
+    env_file:
+      - ../.env
+    environment:
+      CGO_ENABLED: 1
