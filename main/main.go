@@ -6,12 +6,10 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/TerrexTech/go-eventstore-models/model"
-
 	"github.com/TerrexTech/go-commonutils/commonutil"
 	"github.com/TerrexTech/go-eventstore-models/bootstrap"
 	"github.com/TerrexTech/go-kafkautils/kafka"
-	logtrsnpt "github.com/TerrexTech/go-logtransport/log"
+	tlog "github.com/TerrexTech/go-logtransport/log"
 	"github.com/joho/godotenv"
 	"github.com/pkg/errors"
 )
@@ -51,17 +49,6 @@ func validateEnv() {
 		err = errors.Wrapf(err, "Env-var %s is required, but is not set", missingVar)
 		log.Fatalln(err)
 	}
-
-}
-
-func errToLogEntry(err error) model.LogEntry {
-	return model.LogEntry{
-		Description:   err.Error(),
-		ErrorCode:     1,
-		Level:         "ERROR",
-		EventAction:   "",
-		ServiceAction: "",
-	}
 }
 
 func main() {
@@ -80,7 +67,11 @@ func main() {
 	prodConfig := &kafka.ProducerConfig{
 		KafkaBrokers: brokers,
 	}
-	logger, err := logtrsnpt.Init(nil, serviceName, prodConfig, logTopic)
+	logger, err := tlog.Init(nil, serviceName, prodConfig, logTopic)
+	if err != nil {
+		err = errors.Wrap(err, "WARNING: Error creating log-producer")
+		log.Fatalln(err)
+	}
 
 	// Event Consumer
 	eventConsumer, err := kafka.NewConsumer(&kafka.ConsumerConfig{
@@ -90,21 +81,25 @@ func main() {
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error creating Kafka Event-Consumer")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
 	// Handle ConsumerErrors
 	go func() {
 		for err := range eventConsumer.Errors() {
 			err = errors.Wrap(err, "Kafka Consumer Error")
-			log.Println(
-				"Error in event consumer. " +
+			logger.I(tlog.Entry{
+				Description: "Error in event consumer. " +
 					"The events cannot be consumed without a working Kafka Consumer. " +
 					"The service will now exit.",
-			)
-			logger.Log(errToLogEntry(err))
-			log.Fatalln(err)
+			})
+			logger.F(tlog.Entry{
+				Description: err.Error(),
+				ErrorCode:   1,
+			})
 		}
 	}()
 
@@ -112,16 +107,20 @@ func main() {
 	responseProducer, err := kafka.NewProducer(prodConfig)
 	if err != nil {
 		err = errors.Wrap(err, "Error creating Response-Producer")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
 	// Handle ProducerErrors
 	go func() {
 		for prodErr := range responseProducer.Errors() {
 			err = errors.Wrap(prodErr.Err, "Response-Producer Error")
-			logger.Log(errToLogEntry(err))
-			log.Println(err)
+			logger.E(tlog.Entry{
+				Description: err.Error(),
+				ErrorCode:   1,
+			})
 		}
 	}()
 
@@ -130,15 +129,19 @@ func main() {
 	eventTable, err := bootstrap.Event()
 	if err != nil {
 		err = errors.Wrap(err, "EventTable: Error getting Table from Cassandra")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 	log.Println("Bootstrapping EventMeta table")
 	eventMetaTable, err := bootstrap.EventMeta()
 	if err != nil {
 		err = errors.Wrap(err, "EventMetaTable: Error getting Table from Cassandra")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
 	// ======> Setup EventStore
@@ -146,15 +149,19 @@ func main() {
 	metaPartitionKey, err := strconv.Atoi(os.Getenv(pKeyVar))
 	if err != nil {
 		err = errors.Wrap(err, pKeyVar+" must be a valid integer")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
 	eventStore, err := NewEventStore(eventTable, eventMetaTable, int8(metaPartitionKey))
 	if err != nil {
 		err = errors.Wrap(err, "EventStore: Error while initializing EventStore")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
 	// ======> Setup EventHandler
@@ -171,16 +178,22 @@ func main() {
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error while initializing EventHandler")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 
-	log.Println("Event-Persistence Service Initialized")
+	logger.I(tlog.Entry{
+		Description: "Event-Persistence Service Initialized",
+	})
 
 	err = eventConsumer.Consume(context.Background(), handler)
 	if err != nil {
 		err = errors.Wrap(err, "Error while attempting to consume Events")
-		logger.Log(errToLogEntry(err))
-		log.Fatalln(err)
+		logger.F(tlog.Entry{
+			Description: err.Error(),
+			ErrorCode:   1,
+		})
 	}
 }

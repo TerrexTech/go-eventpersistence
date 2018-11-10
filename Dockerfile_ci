@@ -2,5 +2,5 @@
 FROM scratch
 LABEL maintainer="Jaskaranbir Dhillon"
 
-COPY /go-eventpersistence ./
+COPY /agg-metrics-cmd ./
 ENTRYPOINT ["./go-eventpersistence"]

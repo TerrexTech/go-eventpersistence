@@ -17,7 +17,7 @@ import (
 // EventHandlerConfig is the configuration for EventsConsumer.
 type EventHandlerConfig struct {
 	EventStore       EventStore
-	Logger           *tlog.Logger
+	Logger           tlog.Logger
 	ResponseProducer *kafka.Producer
 	ResponseTopic    string
 	ValidActions     []string
@@ -25,7 +25,7 @@ type EventHandlerConfig struct {
 
 // eventHandler handler for Consumer Messages
 type eventHandler struct {
-	config EventHandlerConfig
+	EventHandlerConfig
 }
 
 // NewEventHandler creates a new handler for ConsumerEvents.
@@ -50,24 +50,16 @@ func NewEventHandler(config EventHandlerConfig) (sarama.ConsumerGroupHandler, er
 }
 
 func (e *eventHandler) Setup(sarama.ConsumerGroupSession) error {
-	logEntry := "Initializing Kafka EventHandler"
-	e.config.Logger.Log(model.LogEntry{
-		Description: logEntry,
-		ErrorCode:   0,
-		Level:       "INFO",
+	e.Logger.I(tlog.Entry{
+		Description: "Initializing Kafka EventHandler",
 	})
-	log.Println(logEntry)
 	return nil
 }
 
 func (e *eventHandler) Cleanup(sarama.ConsumerGroupSession) error {
-	logEntry := "Closing Kafka EventHandler"
-	e.config.Logger.Log(model.LogEntry{
-		Description: logEntry,
-		ErrorCode:   0,
-		Level:       "INFO",
+	e.Logger.I(tlog.Entry{
+		Description: "Closing Kafka EventHandler",
 	})
-	log.Println(logEntry)
 
 	return nil
 }
@@ -76,41 +68,29 @@ func (e *eventHandler) ConsumeClaim(
 	session sarama.ConsumerGroupSession,
 	claim sarama.ConsumerGroupClaim,
 ) error {
-	tLog := e.config.Logger
-
-	logEntry := "Listening for new Events..."
-	tLog.Log(model.LogEntry{
-		Description: logEntry,
-		ErrorCode:   0,
-		Level:       "INFO",
+	e.Logger.I(tlog.Entry{
+		Description: "Listening for new Events...",
 	})
-	log.Println(logEntry)
 	for msg := range claim.Messages() {
 		go func(session sarama.ConsumerGroupSession, msg *sarama.ConsumerMessage) {
 			event := &model.Event{}
 			err := json.Unmarshal(msg.Value, event)
 			if err != nil {
 				err = errors.Wrap(err, "Error: unable to Unmarshal Event")
-				tLog.Log(errToLogEntry(err), string(msg.Value))
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, msg.Value)
 
 				session.MarkMessage(msg, "")
 				return
 			}
 
-			logEntry := fmt.Sprintf("Received Event with ID: %s", event.UUID)
-			tLog.Log(model.LogEntry{
-				Description: logEntry,
-				ErrorCode:   0,
-				Level:       "INFO",
-			}, event)
-			log.Printf(logEntry)
-
 			// =====> Validate Event
 			if event.AggregateID == 0 {
 				err = errors.New("received an Event with missing AggregateID")
-				tLog.Log(errToLogEntry(err), event)
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
 
 				session.MarkMessage(msg, "")
 				return
@@ -118,8 +98,9 @@ func (e *eventHandler) ConsumeClaim(
 			if event.NanoTime == 0 {
 				session.MarkMessage(msg, "")
 				err = errors.New("received an Event with missing NanoTime")
-				tLog.Log(errToLogEntry(err), event)
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
 
 				kr := &model.KafkaResponse{
 					AggregateID:   event.AggregateID,
@@ -131,20 +112,25 @@ func (e *eventHandler) ConsumeClaim(
 				resp, err := json.Marshal(kr)
 				if err != nil {
 					err = errors.Wrap(err, "MissingNanoTime Error: Error Marshalling KafkaResponse")
-					tLog.Log(errToLogEntry(err), event)
-					log.Println(err)
+					e.Logger.E(tlog.Entry{
+						Description: err.Error(),
+					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf("%s.%d", e.config.ResponseTopic, event.AggregateID)
+					responseTopic := fmt.Sprintf("%s.%d.%s", e.ResponseTopic, event.AggregateID, event.EventAction)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
-					e.config.ResponseProducer.Input() <- respMsg
+					e.ResponseProducer.Input() <- respMsg
+					e.Logger.D(tlog.Entry{
+						Description: "Produced error-response on topic: " + responseTopic,
+					}, kr)
 				}
 				return
 			}
 			if event.UUID == (uuuid.UUID{}) {
 				session.MarkMessage(msg, "")
 				err = errors.New("received an Event with missing UUID")
-				tLog.Log(errToLogEntry(err), event)
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
 
 				kr := &model.KafkaResponse{
 					AggregateID:   event.AggregateID,
@@ -156,17 +142,26 @@ func (e *eventHandler) ConsumeClaim(
 				resp, err := json.Marshal(kr)
 				if err != nil {
 					err = errors.Wrap(err, "MissingUUID Error: Error Marshalling KafkaResponse")
-					tLog.Log(errToLogEntry(err), event)
-					log.Println(err)
+					e.Logger.E(tlog.Entry{
+						Description: err.Error(),
+					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf("%s.%d", e.config.ResponseTopic, event.AggregateID)
+					responseTopic := fmt.Sprintf(
+						"%s.%d.%s",
+						e.ResponseTopic,
+						event.AggregateID,
+						event.EventAction,
+					)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
-					e.config.ResponseProducer.Input() <- respMsg
+					e.ResponseProducer.Input() <- respMsg
+					e.Logger.D(tlog.Entry{
+						Description: "Produced error-response on topic: " + responseTopic,
+					}, kr)
 				}
 				return
 			}
 
-			isValidAction := commonutil.IsElementInSlice(e.config.ValidActions, event.EventAction)
+			isValidAction := commonutil.IsElementInSlice(e.ValidActions, event.EventAction)
 			if !isValidAction {
 				session.MarkMessage(msg, "")
 				err = fmt.Errorf(
@@ -177,8 +172,9 @@ func (e *eventHandler) ConsumeClaim(
 					event.EventAction,
 				)
 				err = errors.Wrap(err, "Error processing Event")
-				tLog.Log(errToLogEntry(err), event)
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
 
 				kr := &model.KafkaResponse{
 					AggregateID:   event.AggregateID,
@@ -190,26 +186,37 @@ func (e *eventHandler) ConsumeClaim(
 				resp, err := json.Marshal(kr)
 				if err != nil {
 					err = errors.Wrap(err, "InvalidAction Error: Error Marshalling KafkaResponse")
-					tLog.Log(errToLogEntry(err), event)
+					e.Logger.E(tlog.Entry{
+						Description: err.Error(),
+					}, kr, event)
 					log.Println(err)
 				} else {
-					responseTopic := fmt.Sprintf("%s.%d", e.config.ResponseTopic, event.AggregateID)
+					responseTopic := fmt.Sprintf(
+						"%s.%d.%s",
+						e.ResponseTopic,
+						event.AggregateID,
+						event.EventAction,
+					)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
-					e.config.ResponseProducer.Input() <- respMsg
+					e.ResponseProducer.Input() <- respMsg
+					e.Logger.D(tlog.Entry{
+						Description: "Produced error-response on topic: " + responseTopic,
+					}, kr)
 				}
 				return
 			}
 
 			// =====> Process Event
-			aggVersion, err := e.config.EventStore.GetAggVersion(event.AggregateID)
+			aggVersion, err := e.EventStore.GetAggVersion(event.AggregateID)
 			if err != nil {
 				err = errors.Wrapf(
 					err,
 					"GetAggVersion: Error Getting Event-Version to use for Aggregate ID: %d",
 					event.AggregateID,
 				)
-				tLog.Log(errToLogEntry(err), event)
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
 
 				kr := &model.KafkaResponse{
 					AggregateID:   event.AggregateID,
@@ -221,25 +228,39 @@ func (e *eventHandler) ConsumeClaim(
 				resp, err := json.Marshal(kr)
 				if err != nil {
 					err = errors.Wrap(err, "GetAggVersion: Error Marshalling KafkaResponse")
-					tLog.Log(errToLogEntry(err))
-					log.Println(err)
+					e.Logger.E(tlog.Entry{
+						Description: err.Error(),
+					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf("%s.%d", e.config.ResponseTopic, event.AggregateID)
+					responseTopic := fmt.Sprintf(
+						"%s.%d.%s",
+						e.ResponseTopic,
+						event.AggregateID,
+						event.EventAction,
+					)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
-					e.config.ResponseProducer.Input() <- respMsg
+					e.ResponseProducer.Input() <- respMsg
+					e.Logger.D(tlog.Entry{
+						Description: "Produced error-response on topic: " + responseTopic,
+					}, kr)
 				}
 				return
 			}
 			event.Version = aggVersion
-			err = e.config.EventStore.CommitEvent(event)
+			err = e.EventStore.CommitEvent(event)
+
+			e.Logger.D(tlog.Entry{
+				Description: "Event committed.",
+			}, event)
 
 			// =====> Send KafkaResponse from Event-Processing
 			errStr := ""
 			if err != nil {
 				err = errors.Wrap(err, "Error Inserting Event into Cassandra")
-				tLog.Log(errToLogEntry(err))
-				log.Println(err)
 				errStr = err.Error()
+				e.Logger.E(tlog.Entry{
+					Description: errStr,
+				}, event)
 			} else {
 				// MarkOffset to be committed if the insert operation is successful
 				session.MarkMessage(msg, "")
@@ -254,24 +275,26 @@ func (e *eventHandler) ConsumeClaim(
 			resp, err := json.Marshal(kr)
 			if err != nil {
 				err = errors.Wrap(err, "EventHandler: Error Marshalling KafkaResponse")
-				tLog.Log(errToLogEntry(err))
-				log.Println(err)
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event, kr)
 			} else {
-				responseTopic := fmt.Sprintf("%s.%d", e.config.ResponseTopic, event.AggregateID)
-				respMsg := kafka.CreateMessage(responseTopic, resp)
-				e.config.ResponseProducer.Input() <- respMsg
-
-				logEntry := fmt.Sprintf(
-					`Produced KafkaResponse with ID: "%s" on Topic: "%s"`,
-					event.UUID.String(),
-					responseTopic,
+				responseTopic := fmt.Sprintf(
+					"%s.%d.%s",
+					e.ResponseTopic,
+					event.AggregateID,
+					event.EventAction,
 				)
-				tLog.Log(model.LogEntry{
-					Description: logEntry,
-					ErrorCode:   0,
-					Level:       "INFO",
-				}, event)
-				log.Printf(logEntry, kr)
+				respMsg := kafka.CreateMessage(responseTopic, resp)
+				e.ResponseProducer.Input() <- respMsg
+
+				e.Logger.I(tlog.Entry{
+					Description: fmt.Sprintf(
+						`Produced KafkaResponse with ID: "%s" on Topic: "%s"`,
+						event.UUID.String(),
+						responseTopic,
+					),
+				})
 			}
 		}(session, msg)
 	}
