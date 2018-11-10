@@ -69,7 +69,7 @@ func main() {
 	}
 	logger, err := tlog.Init(nil, serviceName, prodConfig, logTopic)
 	if err != nil {
-		err = errors.Wrap(err, "WARNING: Error creating log-producer")
+		err = errors.Wrap(err, "Error creating log-producer")
 		log.Fatalln(err)
 	}
 
