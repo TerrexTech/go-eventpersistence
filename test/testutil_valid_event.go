@@ -25,7 +25,10 @@ type EventTestUtil struct {
 	ConsumerGroupName string
 	ConsumerTopic     string
 	EventsTopic       string
-	ValidActionsCmd   []string
+
+	ValidActionsCmd       []string
+	CmdEventTopicSuffix   string
+	QueryEventTopicSuffix string
 
 	EventTableName string
 	CQLSession     *cql.Session
@@ -77,9 +80,9 @@ func (t *EventTestUtil) DidConsume(
 
 	var topicSuffix string
 	if validCmdAction {
-		topicSuffix = "cmd"
+		topicSuffix = t.CmdEventTopicSuffix
 	} else {
-		topicSuffix = "query"
+		topicSuffix = t.QueryEventTopicSuffix
 	}
 	consumerTopic := fmt.Sprintf(
 		"%s.%d.%s",

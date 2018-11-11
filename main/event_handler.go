@@ -20,8 +20,10 @@ type EventHandlerConfig struct {
 	ResponseProducer *kafka.Producer
 	ResponseTopic    string
 
-	ValidActionsCmd   []string
-	ValidActionsQuery []string
+	ValidActionsCmd       []string
+	ValidActionsQuery     []string
+	CmdEventTopicSuffix   string
+	QueryEventTopicSuffix string
 }
 
 // eventHandler handler for Consumer Messages
@@ -48,6 +50,12 @@ func NewEventHandler(config EventHandlerConfig) (sarama.ConsumerGroupHandler, er
 	}
 	if config.ValidActionsQuery == nil || len(config.ValidActionsQuery) == 0 {
 		return nil, errors.New("invalid config: ValidActionsQuery cannot be blank")
+	}
+	if config.CmdEventTopicSuffix == "" {
+		return nil, errors.New("invalid config: CmdEventTopicSuffix cannot be blank")
+	}
+	if config.QueryEventTopicSuffix == "" {
+		return nil, errors.New("invalid config: QueryEventTopicSuffix cannot be blank")
 	}
 
 	return &eventHandler{config}, nil
@@ -110,9 +118,9 @@ func (e *eventHandler) ConsumeClaim(
 
 			var topicSuffix string
 			if validCmdAction {
-				topicSuffix = "cmd"
+				topicSuffix = e.CmdEventTopicSuffix
 			} else {
-				topicSuffix = "query"
+				topicSuffix = e.QueryEventTopicSuffix
 			}
 			responseTopic := fmt.Sprintf(
 				"%s.%d.%s",
