@@ -42,7 +42,8 @@ func validateEnv() {
 		"KAFKA_CONSUMER_TOPICS",
 		"KAFKA_RESPONSE_TOPIC",
 
-		"VALID_EVENT_ACTIONS",
+		"VALID_EVENT_ACTIONS_CMD",
+		"VALID_EVENT_ACTIONS_QUERY",
 	)
 
 	if err != nil {
@@ -155,7 +156,12 @@ func main() {
 		})
 	}
 
-	eventStore, err := NewEventStore(eventTable, eventMetaTable, int8(metaPartitionKey))
+	eventStore, err := NewEventStore(
+		eventTable,
+		eventMetaTable,
+		logger,
+		int8(metaPartitionKey),
+	)
 	if err != nil {
 		err = errors.Wrap(err, "EventStore: Error while initializing EventStore")
 		logger.F(tlog.Entry{
@@ -165,8 +171,10 @@ func main() {
 	}
 
 	// ======> Setup EventHandler
-	validActionsStr := os.Getenv("VALID_EVENT_ACTIONS")
-	validActions := *commonutil.ParseHosts(validActionsStr)
+	validActionsCmdStr := os.Getenv("VALID_EVENT_ACTIONS_CMD")
+	validActionsCmd := *commonutil.ParseHosts(validActionsCmdStr)
+	validActionsQueryStr := os.Getenv("VALID_EVENT_ACTIONS_QUERY")
+	validActionsQuery := *commonutil.ParseHosts(validActionsQueryStr)
 	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
 
 	handler, err := NewEventHandler(EventHandlerConfig{
@@ -174,7 +182,9 @@ func main() {
 		Logger:           logger,
 		ResponseProducer: responseProducer,
 		ResponseTopic:    responseTopic,
-		ValidActions:     validActions,
+
+		ValidActionsCmd:   validActionsCmd,
+		ValidActionsQuery: validActionsQuery,
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error while initializing EventHandler")
