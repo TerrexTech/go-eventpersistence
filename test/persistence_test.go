@@ -123,12 +123,24 @@ var _ = Describe("EventPersistence", func() {
 
 		validActionsCmdStr := os.Getenv("VALID_EVENT_ACTIONS_CMD")
 		validActionsCmd := *commonutil.ParseHosts(validActionsCmdStr)
+		cmdEventTopicSuffix := os.Getenv("CMD_EVENT_TOPIC_SUFFIX")
+		if cmdEventTopicSuffix == "" {
+			cmdEventTopicSuffix = "cmd"
+		}
+		queryEventTopicSuffix := os.Getenv("QUERY_EVENT_TOPIC_SUFFIX")
+		if queryEventTopicSuffix == "" {
+			queryEventTopicSuffix = "query"
+		}
+
 		testUtil = &EventTestUtil{
 			KafkaBrokers:      brokers,
 			ConsumerGroupName: consumerGroupName,
 			ConsumerTopic:     responseTopic,
 			EventsTopic:       consumerTopics[0],
 			ValidActionsCmd:   validActionsCmd,
+
+			CmdEventTopicSuffix:   cmdEventTopicSuffix,
+			QueryEventTopicSuffix: queryEventTopicSuffix,
 
 			EventTableName: eventTableName,
 			CQLSession:     session,

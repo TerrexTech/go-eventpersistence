@@ -177,6 +177,15 @@ func main() {
 	validActionsQuery := *commonutil.ParseHosts(validActionsQueryStr)
 	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
 
+	cmdEventTopicSuffix := os.Getenv("CMD_EVENT_TOPIC_SUFFIX")
+	if cmdEventTopicSuffix == "" {
+		cmdEventTopicSuffix = "cmd"
+	}
+	queryEventTopicSuffix := os.Getenv("QUERY_EVENT_TOPIC_SUFFIX")
+	if queryEventTopicSuffix == "" {
+		queryEventTopicSuffix = "query"
+	}
+
 	handler, err := NewEventHandler(EventHandlerConfig{
 		EventStore:       eventStore,
 		Logger:           logger,
@@ -185,6 +194,9 @@ func main() {
 
 		ValidActionsCmd:   validActionsCmd,
 		ValidActionsQuery: validActionsQuery,
+
+		CmdEventTopicSuffix:   cmdEventTopicSuffix,
+		QueryEventTopicSuffix: queryEventTopicSuffix,
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error while initializing EventHandler")
