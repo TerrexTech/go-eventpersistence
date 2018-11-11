@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/Shopify/sarama"
 	"github.com/TerrexTech/go-commonutils/commonutil"
@@ -20,7 +19,9 @@ type EventHandlerConfig struct {
 	Logger           tlog.Logger
 	ResponseProducer *kafka.Producer
 	ResponseTopic    string
-	ValidActions     []string
+
+	ValidActionsCmd   []string
+	ValidActionsQuery []string
 }
 
 // eventHandler handler for Consumer Messages
@@ -42,8 +43,11 @@ func NewEventHandler(config EventHandlerConfig) (sarama.ConsumerGroupHandler, er
 	if config.ResponseTopic == "" {
 		return nil, errors.New("invalid config: ResponseTopic cannot be blank")
 	}
-	if config.ValidActions == nil || len(config.ValidActions) == 0 {
-		return nil, errors.New("invalid config: ValidActions cannot be blank")
+	if config.ValidActionsCmd == nil || len(config.ValidActionsCmd) == 0 {
+		return nil, errors.New("invalid config: ValidActionsCmd cannot be blank")
+	}
+	if config.ValidActionsQuery == nil || len(config.ValidActionsQuery) == 0 {
+		return nil, errors.New("invalid config: ValidActionsQuery cannot be blank")
 	}
 
 	return &eventHandler{config}, nil
@@ -86,6 +90,40 @@ func (e *eventHandler) ConsumeClaim(
 			}
 
 			// =====> Validate Event
+			validCmdAction := commonutil.IsElementInSlice(e.ValidActionsCmd, event.EventAction)
+			validQueryAction := commonutil.IsElementInSlice(e.ValidActionsQuery, event.EventAction)
+			if !validCmdAction && !validQueryAction {
+				session.MarkMessage(msg, "")
+				err = fmt.Errorf(
+					`Error: Event with ID "%s" and AggregateID "%d" `+
+						`has invalid EventAction "%s"`,
+					event.UUID,
+					event.AggregateID,
+					event.EventAction,
+				)
+				err = errors.Wrap(err, "Error processing Event")
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				}, event)
+				return
+			}
+
+			var topicSuffix string
+			if validCmdAction {
+				topicSuffix = "cmd"
+			} else {
+				topicSuffix = "query"
+			}
+			responseTopic := fmt.Sprintf(
+				"%s.%d.%s",
+				e.ResponseTopic,
+				event.AggregateID,
+				topicSuffix,
+			)
+			e.Logger.D(tlog.Entry{
+				Description: "Using response topic: " + responseTopic,
+			}, event)
+
 			if event.AggregateID == 0 {
 				err = errors.New("received an Event with missing AggregateID")
 				e.Logger.E(tlog.Entry{
@@ -116,7 +154,6 @@ func (e *eventHandler) ConsumeClaim(
 						Description: err.Error(),
 					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf("%s.%d.%s", e.ResponseTopic, event.AggregateID, event.EventAction)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
@@ -146,57 +183,6 @@ func (e *eventHandler) ConsumeClaim(
 						Description: err.Error(),
 					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf(
-						"%s.%d.%s",
-						e.ResponseTopic,
-						event.AggregateID,
-						event.EventAction,
-					)
-					respMsg := kafka.CreateMessage(responseTopic, resp)
-					e.ResponseProducer.Input() <- respMsg
-					e.Logger.D(tlog.Entry{
-						Description: "Produced error-response on topic: " + responseTopic,
-					}, kr)
-				}
-				return
-			}
-
-			isValidAction := commonutil.IsElementInSlice(e.ValidActions, event.EventAction)
-			if !isValidAction {
-				session.MarkMessage(msg, "")
-				err = fmt.Errorf(
-					`Error: Event with ID "%s" and AggregateID "%d" `+
-						`has invalid EventAction "%s"`,
-					event.UUID,
-					event.AggregateID,
-					event.EventAction,
-				)
-				err = errors.Wrap(err, "Error processing Event")
-				e.Logger.E(tlog.Entry{
-					Description: err.Error(),
-				}, event)
-
-				kr := &model.KafkaResponse{
-					AggregateID:   event.AggregateID,
-					CorrelationID: event.CorrelationID,
-					Input:         msg.Value,
-					Error:         err.Error(),
-					UUID:          event.UUID,
-				}
-				resp, err := json.Marshal(kr)
-				if err != nil {
-					err = errors.Wrap(err, "InvalidAction Error: Error Marshalling KafkaResponse")
-					e.Logger.E(tlog.Entry{
-						Description: err.Error(),
-					}, kr, event)
-					log.Println(err)
-				} else {
-					responseTopic := fmt.Sprintf(
-						"%s.%d.%s",
-						e.ResponseTopic,
-						event.AggregateID,
-						event.EventAction,
-					)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
@@ -232,12 +218,6 @@ func (e *eventHandler) ConsumeClaim(
 						Description: err.Error(),
 					}, event, kr)
 				} else {
-					responseTopic := fmt.Sprintf(
-						"%s.%d.%s",
-						e.ResponseTopic,
-						event.AggregateID,
-						event.EventAction,
-					)
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
@@ -279,12 +259,6 @@ func (e *eventHandler) ConsumeClaim(
 					Description: err.Error(),
 				}, event, kr)
 			} else {
-				responseTopic := fmt.Sprintf(
-					"%s.%d.%s",
-					e.ResponseTopic,
-					event.AggregateID,
-					event.EventAction,
-				)
 				respMsg := kafka.CreateMessage(responseTopic, resp)
 				e.ResponseProducer.Input() <- respMsg
 

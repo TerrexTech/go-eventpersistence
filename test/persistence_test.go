@@ -121,11 +121,14 @@ var _ = Describe("EventPersistence", func() {
 			YearBucket:    2018,
 		}
 
+		validActionsCmdStr := os.Getenv("VALID_EVENT_ACTIONS_CMD")
+		validActionsCmd := *commonutil.ParseHosts(validActionsCmdStr)
 		testUtil = &EventTestUtil{
 			KafkaBrokers:      brokers,
 			ConsumerGroupName: consumerGroupName,
 			ConsumerTopic:     responseTopic,
 			EventsTopic:       consumerTopics[0],
+			ValidActionsCmd:   validActionsCmd,
 
 			EventTableName: eventTableName,
 			CQLSession:     session,
@@ -357,8 +360,8 @@ var _ = Describe("EventPersistence", func() {
 	Describe("An invalid event is produced", func() {
 		Context("an event with invalid action is generated", func() {
 			Specify(
-				"result should appear on Kafka response-topic and event should not be persisted",
-				func(done Done) {
+				"result should not appear on Kafka response-topic and event should not be persisted",
+				func() {
 					cid, err := uuuid.NewV4()
 					Expect(err).ToNot(HaveOccurred())
 					uuid, err := uuuid.NewV4()
@@ -375,8 +378,9 @@ var _ = Describe("EventPersistence", func() {
 
 					go func() {
 						defer GinkgoRecover()
-						for err := range errorChan {
-							Expect(err).ToNot(HaveOccurred())
+						for _ = range errorChan {
+							// Ignore errors, since we want the result
+							// to not be published to Kafka anyway.
 						}
 					}()
 
@@ -387,19 +391,27 @@ var _ = Describe("EventPersistence", func() {
 					go func() {
 						testUtil.DidConsume(
 							invalidMockEvent,
-							20,
+							15,
 							(chan<- *model.KafkaResponse)(responseChan),
 							errorChan,
 						)
 					}()
-					<-responseChan
+
+					isResponseReceived := false
+					go func() {
+						for _ = range responseChan {
+							if !isResponseReceived {
+								isResponseReceived = true
+							}
+						}
+					}()
+					time.Sleep(15 * time.Second)
+					Expect(isResponseReceived).To(BeFalse())
 
 					Byf("Not Persisting Event")
 					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
 					Expect(err).ToNot(HaveOccurred())
-					close(done)
-				}, 30,
-			)
+				})
 		})
 
 		Context("an event with missing NanoTime is generated", func() {

@@ -7,6 +7,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/TerrexTech/go-commonutils/commonutil"
+
 	"github.com/pkg/errors"
 
 	"github.com/Shopify/sarama"
@@ -23,6 +25,7 @@ type EventTestUtil struct {
 	ConsumerGroupName string
 	ConsumerTopic     string
 	EventsTopic       string
+	ValidActionsCmd   []string
 
 	EventTableName string
 	CQLSession     *cql.Session
@@ -70,11 +73,19 @@ func (t *EventTestUtil) DidConsume(
 			"with timeout of 20 seconds",
 	)
 
+	validCmdAction := commonutil.IsElementInSlice(t.ValidActionsCmd, mockEvent.EventAction)
+
+	var topicSuffix string
+	if validCmdAction {
+		topicSuffix = "cmd"
+	} else {
+		topicSuffix = "query"
+	}
 	consumerTopic := fmt.Sprintf(
 		"%s.%d.%s",
 		t.ConsumerTopic,
 		mockEvent.AggregateID,
-		mockEvent.EventAction,
+		topicSuffix,
 	)
 
 	t.Writer("Consuming on Topic: %s", consumerTopic)

@@ -3,6 +3,7 @@ package main
 import (
 	csndra "github.com/TerrexTech/go-cassandrautils/cassandra"
 	"github.com/TerrexTech/go-eventstore-models/model"
+	tlog "github.com/TerrexTech/go-logtransport/log"
 	"github.com/pkg/errors"
 )
 
@@ -16,6 +17,7 @@ type EventStore interface {
 type eventStore struct {
 	eventTable       *csndra.Table
 	eventMetaTable   *csndra.Table
+	logger           tlog.Logger
 	metaPartitionKey int8
 }
 
@@ -23,6 +25,7 @@ type eventStore struct {
 func NewEventStore(
 	eventTable *csndra.Table,
 	eventMetaTable *csndra.Table,
+	logger tlog.Logger,
 	metaPartitionKey int8,
 ) (EventStore, error) {
 	if eventTable == nil {
@@ -31,10 +34,14 @@ func NewEventStore(
 	if eventMetaTable == nil {
 		return nil, errors.New("eventMetaTable cannot be nil")
 	}
+	if logger == nil {
+		return nil, errors.New("logger cannot be nil")
+	}
 
 	return &eventStore{
 		eventTable:       eventTable,
 		eventMetaTable:   eventMetaTable,
+		logger:           logger,
 		metaPartitionKey: metaPartitionKey,
 	}, nil
 }
@@ -66,11 +73,18 @@ func (es *eventStore) GetAggVersion(aggregateID int8) (int64, error) {
 		ResultsBind:   &resultsBind,
 		SelectColumns: []string{aggVerCol},
 	}
+	es.logger.D(tlog.Entry{
+		Description: "GetAggVersion, query created",
+	}, sp)
 	_, err = es.eventMetaTable.Select(sp)
 	if err != nil {
 		err = errors.Wrap(err, "error Fetching Latest Event-Version from EventMeta")
 		return -1, err
 	}
+
+	es.logger.D(tlog.Entry{
+		Description: "GetAggVersion, results received",
+	}, resultsBind)
 
 	if len(resultsBind) > 1 {
 		return -1, errors.New(
@@ -85,6 +99,10 @@ func (es *eventStore) GetAggVersion(aggregateID int8) (int64, error) {
 		}
 		err = <-es.eventMetaTable.AsyncInsert(&meta)
 		if err != nil {
+			err = errors.Wrap(err, "Error writing initial EventMeta to table")
+			es.logger.E(tlog.Entry{
+				Description: "GetAggVersion, results received",
+			}, resultsBind)
 			return -1, err
 		}
 		return meta.AggregateVersion, nil
