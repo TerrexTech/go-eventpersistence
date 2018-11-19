@@ -7,12 +7,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/TerrexTech/go-commonutils/commonutil"
-
 	"github.com/pkg/errors"
 
 	"github.com/Shopify/sarama"
-	"github.com/TerrexTech/go-eventstore-models/model"
+	"github.com/TerrexTech/go-common-models/model"
 	"github.com/TerrexTech/go-kafkautils/kafka"
 	cql "github.com/gocql/gocql"
 	cqlx "github.com/scylladb/gocqlx"
@@ -25,10 +23,6 @@ type EventTestUtil struct {
 	ConsumerGroupName string
 	ConsumerTopic     string
 	EventsTopic       string
-
-	ValidActionsCmd       []string
-	CmdEventTopicSuffix   string
-	QueryEventTopicSuffix string
 
 	EventTableName string
 	CQLSession     *cql.Session
@@ -68,28 +62,14 @@ func (t *EventTestUtil) Produce(mockEvent model.Event, errorChan chan<- error) {
 func (t *EventTestUtil) DidConsume(
 	mockEvent model.Event,
 	timeoutSec int,
-	responseChan chan<- *model.KafkaResponse,
+	responseChan chan<- *model.Document,
 	errorChan chan<- error,
 ) {
 	t.Writer(
 		"Checking if the Kafka response-topic received the event, " +
 			"with timeout of 20 seconds",
 	)
-
-	validCmdAction := commonutil.IsElementInSlice(t.ValidActionsCmd, mockEvent.EventAction)
-
-	var topicSuffix string
-	if validCmdAction {
-		topicSuffix = t.CmdEventTopicSuffix
-	} else {
-		topicSuffix = t.QueryEventTopicSuffix
-	}
-	consumerTopic := fmt.Sprintf(
-		"%s.%d.%s",
-		t.ConsumerTopic,
-		mockEvent.AggregateID,
-		topicSuffix,
-	)
+	consumerTopic := fmt.Sprintf("%s.%d", t.ConsumerTopic, mockEvent.AggregateID)
 
 	t.Writer("Consuming on Topic: %s", consumerTopic)
 	responseConsumer, err := kafka.NewConsumer(&kafka.ConsumerConfig{
@@ -108,17 +88,15 @@ func (t *EventTestUtil) DidConsume(
 	msgCallback := func(msg *sarama.ConsumerMessage) bool {
 		// Unmarshal the Kafka-Response
 		t.Writer("Verifying received response")
-		response := &model.KafkaResponse{}
+		response := &model.Document{}
 		err := json.Unmarshal(msg.Value, response)
 		errorChan <- err
 
-		log.Printf("Response UUID: %s", response.UUID)
 		log.Printf("Response CorrelationID: %s", response.CorrelationID)
+		log.Printf("MockEvent UUID: %s", mockEvent.UUID)
 
 		// Check if the event is the one we are looking for
-		cidMatch := response.CorrelationID == mockEvent.CorrelationID
-		uuidMatch := response.UUID == mockEvent.UUID
-		if cidMatch && uuidMatch {
+		if response.CorrelationID == mockEvent.UUID {
 			responseChan <- response
 			responseConsumer.Close()
 			return true
@@ -169,8 +147,8 @@ func (t *EventTestUtil) DidStore(mockEvent model.Event, aggVersion int64) error 
 	if actualEvent.AggregateID != mockEvent.AggregateID {
 		return errors.New("AggregateID mismatch")
 	}
-	if actualEvent.EventAction != mockEvent.EventAction {
-		return errors.New("EventAction mismatch")
+	if actualEvent.Action != mockEvent.Action {
+		return errors.New("Action mismatch")
 	}
 	if actualEvent.NanoTime != mockEvent.NanoTime {
 		return errors.New("NanoTime mismatch")

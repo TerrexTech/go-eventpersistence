@@ -5,8 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Shopify/sarama"
-	"github.com/TerrexTech/go-commonutils/commonutil"
-	"github.com/TerrexTech/go-eventstore-models/model"
+	"github.com/TerrexTech/go-common-models/model"
 	"github.com/TerrexTech/go-kafkautils/kafka"
 	tlog "github.com/TerrexTech/go-logtransport/log"
 	"github.com/TerrexTech/uuuid"
@@ -19,11 +18,7 @@ type EventHandlerConfig struct {
 	Logger           tlog.Logger
 	ResponseProducer *kafka.Producer
 	ResponseTopic    string
-
-	ValidActionsCmd       []string
-	ValidActionsQuery     []string
-	CmdEventTopicSuffix   string
-	QueryEventTopicSuffix string
+	ServiceName      string
 }
 
 // eventHandler handler for Consumer Messages
@@ -45,17 +40,8 @@ func NewEventHandler(config EventHandlerConfig) (sarama.ConsumerGroupHandler, er
 	if config.ResponseTopic == "" {
 		return nil, errors.New("invalid config: ResponseTopic cannot be blank")
 	}
-	if config.ValidActionsCmd == nil || len(config.ValidActionsCmd) == 0 {
-		return nil, errors.New("invalid config: ValidActionsCmd cannot be blank")
-	}
-	if config.ValidActionsQuery == nil || len(config.ValidActionsQuery) == 0 {
-		return nil, errors.New("invalid config: ValidActionsQuery cannot be blank")
-	}
-	if config.CmdEventTopicSuffix == "" {
-		return nil, errors.New("invalid config: CmdEventTopicSuffix cannot be blank")
-	}
-	if config.QueryEventTopicSuffix == "" {
-		return nil, errors.New("invalid config: QueryEventTopicSuffix cannot be blank")
+	if config.ServiceName == "" {
+		return nil, errors.New("invalid config: ServiceName cannot be blank")
 	}
 
 	return &eventHandler{config}, nil
@@ -98,36 +84,7 @@ func (e *eventHandler) ConsumeClaim(
 			}
 
 			// =====> Validate Event
-			validCmdAction := commonutil.IsElementInSlice(e.ValidActionsCmd, event.EventAction)
-			validQueryAction := commonutil.IsElementInSlice(e.ValidActionsQuery, event.EventAction)
-			if !validCmdAction && !validQueryAction {
-				session.MarkMessage(msg, "")
-				err = fmt.Errorf(
-					`Error: Event with ID "%s" and AggregateID "%d" `+
-						`has invalid EventAction "%s"`,
-					event.UUID,
-					event.AggregateID,
-					event.EventAction,
-				)
-				err = errors.Wrap(err, "Error processing Event")
-				e.Logger.E(tlog.Entry{
-					Description: err.Error(),
-				}, event)
-				return
-			}
-
-			var topicSuffix string
-			if validCmdAction {
-				topicSuffix = e.CmdEventTopicSuffix
-			} else {
-				topicSuffix = e.QueryEventTopicSuffix
-			}
-			responseTopic := fmt.Sprintf(
-				"%s.%d.%s",
-				e.ResponseTopic,
-				event.AggregateID,
-				topicSuffix,
-			)
+			responseTopic := fmt.Sprintf("%s.%d", e.ResponseTopic, event.AggregateID)
 			e.Logger.D(tlog.Entry{
 				Description: "Using response topic: " + responseTopic,
 			}, event)
@@ -141,6 +98,15 @@ func (e *eventHandler) ConsumeClaim(
 				session.MarkMessage(msg, "")
 				return
 			}
+			docUUID, err := uuuid.NewV4()
+			if err != nil {
+				err = errors.Wrap(err, "Error generating UUID for Document")
+				e.Logger.E(tlog.Entry{
+					Description: err.Error(),
+				})
+				docUUID = uuuid.UUID{}
+			}
+
 			if event.NanoTime == 0 {
 				session.MarkMessage(msg, "")
 				err = errors.New("received an Event with missing NanoTime")
@@ -148,25 +114,27 @@ func (e *eventHandler) ConsumeClaim(
 					Description: err.Error(),
 				}, event)
 
-				kr := &model.KafkaResponse{
-					AggregateID:   event.AggregateID,
-					CorrelationID: event.CorrelationID,
-					Input:         msg.Value,
+				doc := &model.Document{
+					CorrelationID: event.UUID,
+					Data:          msg.Value,
 					Error:         err.Error(),
-					UUID:          event.UUID,
+					ErrorCode:     1,
+					Source:        e.ServiceName,
+					Topic:         responseTopic,
+					UUID:          docUUID,
 				}
-				resp, err := json.Marshal(kr)
+				resp, err := json.Marshal(doc)
 				if err != nil {
-					err = errors.Wrap(err, "MissingNanoTime Error: Error Marshalling KafkaResponse")
+					err = errors.Wrap(err, "MissingNanoTime Error: Error Marshalling Document")
 					e.Logger.E(tlog.Entry{
 						Description: err.Error(),
-					}, event, kr)
+					}, event, doc)
 				} else {
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
 						Description: "Produced error-response on topic: " + responseTopic,
-					}, kr)
+					}, doc)
 				}
 				return
 			}
@@ -177,25 +145,27 @@ func (e *eventHandler) ConsumeClaim(
 					Description: err.Error(),
 				}, event)
 
-				kr := &model.KafkaResponse{
-					AggregateID:   event.AggregateID,
-					CorrelationID: event.CorrelationID,
-					Input:         msg.Value,
+				doc := &model.Document{
+					CorrelationID: event.UUID,
+					Data:          msg.Value,
 					Error:         err.Error(),
-					UUID:          event.UUID,
+					ErrorCode:     1,
+					Source:        e.ServiceName,
+					Topic:         responseTopic,
+					UUID:          docUUID,
 				}
-				resp, err := json.Marshal(kr)
+				resp, err := json.Marshal(doc)
 				if err != nil {
-					err = errors.Wrap(err, "MissingUUID Error: Error Marshalling KafkaResponse")
+					err = errors.Wrap(err, "MissingUUID Error: Error Marshalling Document")
 					e.Logger.E(tlog.Entry{
 						Description: err.Error(),
-					}, event, kr)
+					}, event, doc)
 				} else {
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
 						Description: "Produced error-response on topic: " + responseTopic,
-					}, kr)
+					}, doc)
 				}
 				return
 			}
@@ -212,25 +182,27 @@ func (e *eventHandler) ConsumeClaim(
 					Description: err.Error(),
 				}, event)
 
-				kr := &model.KafkaResponse{
-					AggregateID:   event.AggregateID,
-					CorrelationID: event.CorrelationID,
-					Input:         msg.Value,
+				doc := &model.Document{
+					CorrelationID: event.UUID,
+					Data:          msg.Value,
 					Error:         err.Error(),
-					UUID:          event.UUID,
+					ErrorCode:     1,
+					Source:        e.ServiceName,
+					Topic:         responseTopic,
+					UUID:          docUUID,
 				}
-				resp, err := json.Marshal(kr)
+				resp, err := json.Marshal(doc)
 				if err != nil {
-					err = errors.Wrap(err, "GetAggVersion: Error Marshalling KafkaResponse")
+					err = errors.Wrap(err, "GetAggVersion: Error Marshalling Document")
 					e.Logger.E(tlog.Entry{
 						Description: err.Error(),
-					}, event, kr)
+					}, event, doc)
 				} else {
 					respMsg := kafka.CreateMessage(responseTopic, resp)
 					e.ResponseProducer.Input() <- respMsg
 					e.Logger.D(tlog.Entry{
 						Description: "Produced error-response on topic: " + responseTopic,
-					}, kr)
+					}, doc)
 				}
 				return
 			}
@@ -241,7 +213,7 @@ func (e *eventHandler) ConsumeClaim(
 				Description: "Event committed.",
 			}, event)
 
-			// =====> Send KafkaResponse from Event-Processing
+			// =====> Send Document from Event-Processing
 			errStr := ""
 			if err != nil {
 				err = errors.Wrap(err, "Error Inserting Event into Cassandra")
@@ -254,29 +226,30 @@ func (e *eventHandler) ConsumeClaim(
 				session.MarkMessage(msg, "")
 			}
 
-			kr := &model.KafkaResponse{
-				AggregateID:   event.AggregateID,
-				CorrelationID: event.CorrelationID,
-				Error:         errStr,
-				UUID:          event.UUID,
+			doc := &model.Document{
+				CorrelationID: event.UUID,
+				Data:          msg.Value,
+				Source:        e.ServiceName,
+				Topic:         responseTopic,
+				UUID:          docUUID,
 			}
-			resp, err := json.Marshal(kr)
+			resp, err := json.Marshal(doc)
 			if err != nil {
-				err = errors.Wrap(err, "EventHandler: Error Marshalling KafkaResponse")
+				err = errors.Wrap(err, "EventHandler: Error Marshalling Document")
 				e.Logger.E(tlog.Entry{
 					Description: err.Error(),
-				}, event, kr)
+				}, event, doc)
 			} else {
 				respMsg := kafka.CreateMessage(responseTopic, resp)
 				e.ResponseProducer.Input() <- respMsg
 
 				e.Logger.I(tlog.Entry{
 					Description: fmt.Sprintf(
-						`Produced KafkaResponse with ID: "%s" on Topic: "%s"`,
+						`Produced Document with ID: "%s" on Topic: "%s"`,
 						event.UUID.String(),
 						responseTopic,
 					),
-				})
+				}, doc)
 			}
 		}(session, msg)
 	}

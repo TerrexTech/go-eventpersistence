@@ -6,8 +6,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/TerrexTech/go-common-models/bootstrap"
 	"github.com/TerrexTech/go-commonutils/commonutil"
-	"github.com/TerrexTech/go-eventstore-models/bootstrap"
 	"github.com/TerrexTech/go-kafkautils/kafka"
 	tlog "github.com/TerrexTech/go-logtransport/log"
 	"github.com/joho/godotenv"
@@ -41,9 +41,6 @@ func validateEnv() {
 		"KAFKA_CONSUMER_GROUP",
 		"KAFKA_CONSUMER_TOPICS",
 		"KAFKA_RESPONSE_TOPIC",
-
-		"VALID_EVENT_ACTIONS_CMD",
-		"VALID_EVENT_ACTIONS_QUERY",
 	)
 
 	if err != nil {
@@ -171,32 +168,14 @@ func main() {
 	}
 
 	// ======> Setup EventHandler
-	validActionsCmdStr := os.Getenv("VALID_EVENT_ACTIONS_CMD")
-	validActionsCmd := *commonutil.ParseHosts(validActionsCmdStr)
-	validActionsQueryStr := os.Getenv("VALID_EVENT_ACTIONS_QUERY")
-	validActionsQuery := *commonutil.ParseHosts(validActionsQueryStr)
 	responseTopic := os.Getenv("KAFKA_RESPONSE_TOPIC")
-
-	cmdEventTopicSuffix := os.Getenv("CMD_EVENT_TOPIC_SUFFIX")
-	if cmdEventTopicSuffix == "" {
-		cmdEventTopicSuffix = "cmd"
-	}
-	queryEventTopicSuffix := os.Getenv("QUERY_EVENT_TOPIC_SUFFIX")
-	if queryEventTopicSuffix == "" {
-		queryEventTopicSuffix = "query"
-	}
 
 	handler, err := NewEventHandler(EventHandlerConfig{
 		EventStore:       eventStore,
 		Logger:           logger,
 		ResponseProducer: responseProducer,
 		ResponseTopic:    responseTopic,
-
-		ValidActionsCmd:   validActionsCmd,
-		ValidActionsQuery: validActionsQuery,
-
-		CmdEventTopicSuffix:   cmdEventTopicSuffix,
-		QueryEventTopicSuffix: queryEventTopicSuffix,
+		ServiceName:      serviceName,
 	})
 	if err != nil {
 		err = errors.Wrap(err, "Error while initializing EventHandler")

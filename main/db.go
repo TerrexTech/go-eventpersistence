@@ -2,7 +2,7 @@ package main
 
 import (
 	csndra "github.com/TerrexTech/go-cassandrautils/cassandra"
-	"github.com/TerrexTech/go-eventstore-models/model"
+	"github.com/TerrexTech/go-common-models/model"
 	tlog "github.com/TerrexTech/go-logtransport/log"
 	"github.com/pkg/errors"
 )
