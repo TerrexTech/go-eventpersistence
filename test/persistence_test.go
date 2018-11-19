@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/TerrexTech/go-common-models/bootstrap"
+	"github.com/TerrexTech/go-common-models/model"
 	"github.com/TerrexTech/go-commonutils/commonutil"
-	"github.com/TerrexTech/go-eventstore-models/bootstrap"
-	"github.com/TerrexTech/go-eventstore-models/model"
 	"github.com/TerrexTech/uuuid"
 	cql "github.com/gocql/gocql"
 	"github.com/joho/godotenv"
@@ -110,7 +110,7 @@ var _ = Describe("EventPersistence", func() {
 		cid, err := uuuid.NewV4()
 		Expect(err).ToNot(HaveOccurred())
 		mockEvent = model.Event{
-			EventAction:   "insert",
+			Action:        "test-action",
 			AggregateID:   1,
 			CorrelationID: cid,
 			Data:          []byte("test-data"),
@@ -121,26 +121,11 @@ var _ = Describe("EventPersistence", func() {
 			YearBucket:    2018,
 		}
 
-		validActionsCmdStr := os.Getenv("VALID_EVENT_ACTIONS_CMD")
-		validActionsCmd := *commonutil.ParseHosts(validActionsCmdStr)
-		cmdEventTopicSuffix := os.Getenv("CMD_EVENT_TOPIC_SUFFIX")
-		if cmdEventTopicSuffix == "" {
-			cmdEventTopicSuffix = "cmd"
-		}
-		queryEventTopicSuffix := os.Getenv("QUERY_EVENT_TOPIC_SUFFIX")
-		if queryEventTopicSuffix == "" {
-			queryEventTopicSuffix = "query"
-		}
-
 		testUtil = &EventTestUtil{
 			KafkaBrokers:      brokers,
 			ConsumerGroupName: consumerGroupName,
 			ConsumerTopic:     responseTopic,
 			EventsTopic:       consumerTopics[0],
-			ValidActionsCmd:   validActionsCmd,
-
-			CmdEventTopicSuffix:   cmdEventTopicSuffix,
-			QueryEventTopicSuffix: queryEventTopicSuffix,
 
 			EventTableName: eventTableName,
 			CQLSession:     session,
@@ -166,7 +151,7 @@ var _ = Describe("EventPersistence", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -184,7 +169,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							mockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -202,7 +187,7 @@ var _ = Describe("EventPersistence", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -212,7 +197,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.EventAction = "delete"
+					mockEvent.Action = "delete-action"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -222,7 +207,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							mockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -240,7 +225,7 @@ var _ = Describe("EventPersistence", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -250,7 +235,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.EventAction = "query"
+					mockEvent.Action = "query-action"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -260,7 +245,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							mockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -278,7 +263,7 @@ var _ = Describe("EventPersistence", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should be persisted",
 				func(done Done) {
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -288,7 +273,7 @@ var _ = Describe("EventPersistence", func() {
 						}
 					}()
 
-					mockEvent.EventAction = "update"
+					mockEvent.Action = "update-action"
 
 					Byf("Producing Event")
 					testUtil.Produce(mockEvent, errorChan)
@@ -298,7 +283,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							mockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -370,62 +355,6 @@ var _ = Describe("EventPersistence", func() {
 	})
 
 	Describe("An invalid event is produced", func() {
-		Context("an event with invalid action is generated", func() {
-			Specify(
-				"result should not appear on Kafka response-topic and event should not be persisted",
-				func() {
-					cid, err := uuuid.NewV4()
-					Expect(err).ToNot(HaveOccurred())
-					uuid, err := uuuid.NewV4()
-					Expect(err).ToNot(HaveOccurred())
-
-					invalidMockEvent := mockEvent
-					invalidMockEvent.AggregateID = 1
-					invalidMockEvent.EventAction = "InvalidEventAction"
-					invalidMockEvent.CorrelationID = cid
-					invalidMockEvent.UUID = uuid
-
-					responseChan := make(chan *model.KafkaResponse)
-					errorChan := make(chan error)
-
-					go func() {
-						defer GinkgoRecover()
-						for _ = range errorChan {
-							// Ignore errors, since we want the result
-							// to not be published to Kafka anyway.
-						}
-					}()
-
-					Byf("Producing Event")
-					testUtil.Produce(invalidMockEvent, errorChan)
-
-					Byf("Processing Event")
-					go func() {
-						testUtil.DidConsume(
-							invalidMockEvent,
-							15,
-							(chan<- *model.KafkaResponse)(responseChan),
-							errorChan,
-						)
-					}()
-
-					isResponseReceived := false
-					go func() {
-						for _ = range responseChan {
-							if !isResponseReceived {
-								isResponseReceived = true
-							}
-						}
-					}()
-					time.Sleep(15 * time.Second)
-					Expect(isResponseReceived).To(BeFalse())
-
-					Byf("Not Persisting Event")
-					err = testUtil.DidNotStore(invalidMockEvent, metaAggVersion)
-					Expect(err).ToNot(HaveOccurred())
-				})
-		})
-
 		Context("an event with missing NanoTime is generated", func() {
 			Specify(
 				"result should appear on Kafka response-topic and event should not be persisted",
@@ -433,7 +362,7 @@ var _ = Describe("EventPersistence", func() {
 					invalidMockEvent := mockEvent
 					invalidMockEvent.NanoTime = 0
 
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -451,7 +380,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							invalidMockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -472,7 +401,7 @@ var _ = Describe("EventPersistence", func() {
 					invalidMockEvent := mockEvent
 					invalidMockEvent.UUID = uuuid.UUID{}
 
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -490,7 +419,7 @@ var _ = Describe("EventPersistence", func() {
 						testUtil.DidConsume(
 							invalidMockEvent,
 							20,
-							(chan<- *model.KafkaResponse)(responseChan),
+							(chan<- *model.Document)(responseChan),
 							errorChan,
 						)
 					}()
@@ -515,7 +444,7 @@ var _ = Describe("EventPersistence", func() {
 					invalidMockEvent.AggregateID = 0
 					invalidMockEvent.UUID = uuid
 
-					responseChan := make(chan *model.KafkaResponse)
+					responseChan := make(chan *model.Document)
 					errorChan := make(chan error)
 
 					go func() {
@@ -531,7 +460,7 @@ var _ = Describe("EventPersistence", func() {
 					testUtil.DidConsume(
 						invalidMockEvent,
 						20,
-						(chan<- *model.KafkaResponse)(responseChan),
+						(chan<- *model.Document)(responseChan),
 						errorChan,
 					)
 
